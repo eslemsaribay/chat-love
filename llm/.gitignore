@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Model files (large binaries)
+models/*.gguf
+models/*.bin
+models/*.safetensors
+
+# Keep the directory
+!models/.gitkeep
+
+# Conversation logs
+conversation_logs/
+*.json
+
+# OS
+.DS_Store
+Thumbs.db
