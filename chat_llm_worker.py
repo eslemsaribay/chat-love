@@ -56,16 +56,13 @@ class ChatLLMWorker(threading.Thread):
         accumulated_text = ""
 
         try:
-            # Call LLM with streaming
+            # Call LLM with streaming - yields plain text strings
             for chunk in self.llm_interface.send_message_stream(self.user_message):
-                # Accumulate text
-                if isinstance(chunk, dict) and "data" in chunk:
-                    chunk_text = chunk["data"].get("response", "")
-                    accumulated_text += chunk_text
-
-                    # Call streaming callback
+                # chunk is a plain string from generate_stream()
+                if isinstance(chunk, str):
+                    accumulated_text += chunk
                     if self.streaming_callback:
-                        self.streaming_callback(chunk_text, accumulated_text)
+                        self.streaming_callback(chunk, accumulated_text)
 
             # Call final callback with full text
             self.callback(accumulated_text, True)
@@ -80,12 +77,14 @@ class ChatLLMWorker(threading.Thread):
             # Call LLM (blocks until complete)
             result = self.llm_interface.send_message(self.user_message)
 
-            # Extract response text
-            if isinstance(result, dict) and "data" in result:
-                response_text = result["data"].get("response", "")
+            # Extract response text - key is "text" not "response"
+            if isinstance(result, dict) and result.get("success") and "data" in result:
+                response_text = result["data"].get("text", "")
                 self.callback(response_text, True)
+            elif isinstance(result, dict) and "error" in result:
+                self.callback(result["error"], False)
             else:
-                self.callback(str(result), True)
+                self.callback(str(result), False)
 
         except Exception as e:
             print(f"LLM error: {e}")

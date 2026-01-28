@@ -37,7 +37,6 @@ def setup_chat_app():
     python_dat = _create_spec_generator(container)
     _create_text_display(container, python_dat)
     _create_keyboard_input(container, python_dat)
-    _create_output(container)
 
     # Done
     _print_completion_message(container)
@@ -70,6 +69,30 @@ def _check_prerequisites(project):
 
     print(f"OK Background ready: {bg_out.path}")
     return True
+
+
+# ============================================
+# Helper: Table Regeneration
+# ============================================
+
+def _regenerate_table_from_manager(chat_manager, table_dat, config):
+    """Regenerate table DAT from ChatManager state (used by update callback)"""
+    table_dat.clear()
+    table_dat.appendRow(['x', 'y', 'text', 'fontsize', 'fontcolorr', 'fontcolorg', 'fontcolorb'])
+
+    for msg in chat_manager.get_display_messages():
+        if msg.role == "user":
+            color = config["user_color"]
+        elif msg.role == "input":
+            color = config["input_color"]
+        else:
+            color = config["assistant_color"]
+
+        table_dat.appendRow([
+            config["chat_x"], msg.y_position, msg.text,
+            config["font_size"], color[0], color[1], color[2]
+        ])
+    table_dat.cook(force=True)
 
 
 # ============================================
@@ -106,7 +129,24 @@ def _create_container(project):
     from chat_config import CHAT_CONFIG
     from chat_manager import ChatManager
 
-    chat_manager = ChatManager(CHAT_CONFIG)
+    # Create update callback that will regenerate the table when messages change
+    # This closure captures 'container' reference for later use by LLM worker threads
+    def on_chat_update():
+        """Callback to regenerate table when messages change (called from worker threads)"""
+        # Use TouchDesigner's run() to execute on main thread (thread-safe)
+        def do_update():
+            try:
+                table_dat = container.op('chat_spec_generator')
+                chat_mgr = container.fetch('chat_manager', None)
+                if table_dat and chat_mgr:
+                    _regenerate_table_from_manager(chat_mgr, table_dat, CHAT_CONFIG)
+            except Exception as e:
+                print(f"Chat update error: {e}")
+
+        # Schedule on main thread
+        run("args[0]()", do_update, delayFrames=1)
+
+    chat_manager = ChatManager(CHAT_CONFIG, on_update_callback=on_chat_update)
 
     # Try to initialize LLM (will print error if it fails, but continue)
     try:
@@ -131,7 +171,7 @@ def _create_container(project):
 def _create_container_input(container):
     """Create In TOP inside container to accept background input"""
 
-    print("\n[0/4] Creating container input...")
+    print("\n[1/4] Creating container input...")
 
     # Create In TOP
     in_top = container.create(inTOP, 'in1')
@@ -151,7 +191,7 @@ def _create_container_input(container):
 def _create_spec_generator(container):
     """Create Table DAT with initial messages from ChatManager"""
 
-    print("\n[1/4] Creating specification table...")
+    print("\n[2/4] Creating specification table...")
 
     # Create Table DAT
     table_dat = container.create(tableDAT, 'chat_spec_generator')
@@ -201,7 +241,7 @@ def _create_spec_generator(container):
 def _create_text_display(container, spec_dat):
     """Create Text COMP that renders from specification DAT with per-row colors"""
 
-    print("\n[2/4] Creating text display...")
+    print("\n[3/4] Creating text display...")
 
     in_top = container.op('in1')
 
@@ -233,18 +273,15 @@ def _create_text_display(container, spec_dat):
     text_comp.nodeX = 0
     text_comp.nodeY = -200
 
-    # Get the internal output TOP (needed for connecting to container output)
-    text_output = text_comp.op('out1')
-
-    if not text_output:
-        print("  WARNING: Could not find out1 inside Text COMP")
+    # Note: Text COMP IS a TOP - no need to find 'out1' inside it
+    # The text_comp itself is the output that can be connected to other TOPs
 
     print(f"  OK Created: {text_comp.path}")
     print(f"    - Resolution: {GLOBAL_CONTEXT.width}x{GLOBAL_CONTEXT.height}")
     print(f"    - Reading spec from: {spec_dat.path}")
     print(f"    - Background TOP: {in_top.path}")
     print(f"    - Per-row font colors enabled")
-    print(f"    - Output TOP: {text_output.path if text_output else 'NOT FOUND'}")
+    print(f"    - Output: text_comp itself (is a TOP)")
 
     return text_comp
 
@@ -256,25 +293,25 @@ def _create_text_display(container, spec_dat):
 def _create_keyboard_input(container, spec_dat):
     """Create keyboard input DAT and callbacks"""
 
-    print("\n[3/4] Creating keyboard input...")
+    print("\n[4/4] Creating keyboard input...")
 
     # Create Keyboard In DAT
     keyboard_dat = container.create(keyboardinDAT, 'keyboard_in')
     keyboard_dat.nodeX = 200
     keyboard_dat.nodeY = 0
 
-    # Configure
+    # Configure - leave keys empty to capture all keys
     keyboard_dat.par.keys = ''
     keyboard_dat.par.maxlines = 1
-    keyboard_dat.par.perform = False
+    keyboard_dat.par.active = True  # Enable keyboard capture
 
     # Create callbacks DAT
     callbacks_dat = container.create(textDAT, 'keyboard_callbacks')
     callbacks_dat.nodeX = 400
     callbacks_dat.nodeY = 0
 
-    # Link keyboard to callbacks
-    keyboard_dat.par.callbacks = callbacks_dat
+    # Link keyboard to callbacks - use PATH, not object
+    keyboard_dat.par.callbacks = callbacks_dat.path
 
     # Callback code
     callback_code = '''# Keyboard callbacks
@@ -282,38 +319,54 @@ def _create_keyboard_input(container, spec_dat):
 def onKey(dat, key, character, alt, lAlt, rAlt, ctrl, lCtrl, rCtrl, shift, lShift, rShift, state, time):
     """Handle key press events"""
 
-    parent_comp = op('..')
-    chat_manager = parent_comp.fetch('chat_manager', None)
-    table_dat = parent_comp.op('chat_spec_generator')
-
-    if not chat_manager or not table_dat:
-        return
-
-    # Import config for colors
-    from chat_config import CHAT_CONFIG
-
-    # Process key press (state=True) and key repeat events
+    # Debug: confirm callback is triggered
     if state:
-        # Handle special keys
-        if key == 'return':
-            # Submit input via ChatManager
-            chat_manager.submit_input()
-            _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+        print(f"KEY: {key}, char: {character}")
 
-        elif key == 'backspace':
-            # Remove last character
-            chat_manager.backspace_input()
-            _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+    try:
+        parent_comp = op('..')
+        chat_manager = parent_comp.fetch('chat_manager', None)
+        table_dat = parent_comp.op('chat_spec_generator')
 
-        elif key == 'escape':
-            # Clear input
-            chat_manager.clear_input()
-            _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+        if not chat_manager or not table_dat:
+            print("WARNING: chat_manager or table_dat not found")
+            return
 
-        elif character and character.isprintable():
-            # Add character
-            chat_manager.append_to_input(character)
-            _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+        # Import config for colors
+        from chat_config import CHAT_CONFIG
+
+        # Process key press (state=True) and key repeat events
+        if state:
+            # Handle special keys
+            if key == 'enter':
+                # Submit input via ChatManager
+                chat_manager.submit_input()
+                _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+
+            elif key == 'backspace':
+                # Remove last character
+                chat_manager.backspace_input()
+                _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+
+            elif key == 'esc':
+                # Clear input
+                chat_manager.clear_input()
+                _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+
+            elif key == 'F5':
+                # Reset entire chat (F5 = refresh/reset)
+                chat_manager.reset()
+                _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+
+            elif character and character.isprintable():
+                # Add character
+                chat_manager.append_to_input(character)
+                _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+
+    except Exception as e:
+        print(f"ERROR in keyboard callback: {e}")
+        import traceback
+        traceback.print_exc()
 
 def _regenerate_table(chat_manager, table_dat, config):
     """Regenerate the entire specification table from ChatManager"""
@@ -357,46 +410,6 @@ def _regenerate_table(chat_manager, table_dat, config):
 
 
 # ============================================
-# Output
-# ============================================
-
-def _create_output(container):
-    """Create container output connected to chat_display"""
-
-    print("\n[4/4] Creating container output...")
-
-    text_comp = container.op('chat_display')
-
-    # Get the internal output TOP from Text COMP
-    text_output = text_comp.op('out1') if text_comp else None
-
-    if not text_output:
-        print("  ERROR: Could not find Text COMP output TOP (out1)")
-        return None
-
-    # Create Out TOP for container output
-    out_top = container.create(outTOP, 'out1')
-    out_top.inputConnectors[0].connect(text_output)
-    out_top.nodeX = 0
-    out_top.nodeY = -300
-
-    # Make the container display its output when viewed
-    container.viewer = True
-    container.activeViewer = True
-
-    # Set display flag on output
-    out_top.display = True
-    out_top.viewer = True
-
-    print(f"  OK Created Out TOP: {out_top.path}")
-    print(f"    - Input: {text_output.path}")
-    print(f"    - Container output connector ready")
-    print(f"    - Text COMP composites text over background internally")
-
-    return out_top
-
-
-# ============================================
 # Completion Message
 # ============================================
 
@@ -413,12 +426,11 @@ def _print_completion_message(container):
     print(f"Bot name: {CHAT_CONFIG['bot_name']}")
     print(f"Initial message: {CHAT_CONFIG['initial_message']}")
     print("\nManual connections required:")
-    print(f"  1. Connect background_simple -> {container.path} input connector (with mouse)")
-    print(f"  2. Create viewer and connect {container.path} output connector to it (optional)")
+    print(f"  1. Connect background_simple -> {container.path} input connector")
+    print(f"  2. Connect {container.path} to a Window COMP for viewing")
     print("\nArchitecture:")
-    print(f"  - Inside container: in1 -> chat_display (as background) -> out1")
+    print(f"  - Inside container: in1 -> chat_display (text over background)")
     print(f"  - Text COMP composites text over background internally")
-    print(f"  - Container has input/output connectors (MediaPipe style)")
     print(f"  - Per-row font colors enabled via specification DAT")
     print("\nHow to use:")
     print("  1. Click on 'chat_view' in project1")
@@ -431,6 +443,7 @@ def _print_completion_message(container):
     print("  - ENTER: Submit message (first message extracts username)")
     print("  - BACKSPACE: Delete last character")
     print("  - ESC: Clear input")
+    print("  - F5: Reset chat (clear all messages, context, username)")
     print("\nNote: Username will be extracted from first message")
     print("=" * 60)
 

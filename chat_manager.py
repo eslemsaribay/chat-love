@@ -68,6 +68,40 @@ class ChatManager:
         initial_msg = self.config["initial_message"]
         self.add_assistant_message(f"{bot_name}: {initial_msg}")
 
+    def reset(self):
+        """
+        Reset the entire chat state:
+        - Clear all messages
+        - Clear input buffer
+        - Reset username to None
+        - Reset awaiting_username flag
+        - Clear LLM conversation context
+        - Add initial bot greeting
+        """
+        print("Resetting chat...")
+
+        # Clear local state
+        self.messages = []
+        self.current_input = ""
+        self.config["user_name"] = None
+        self.awaiting_username = True
+
+        # Clear LLM conversation context if available
+        if self.llm_interface:
+            try:
+                self.llm_interface.clear_conversation()
+                print("  - LLM context cleared")
+            except Exception as e:
+                print(f"  - Warning: Could not clear LLM context: {e}")
+
+        # Add initial bot greeting
+        self.add_initial_message()
+
+        # Trigger display refresh
+        self._notify_update()
+
+        print("Chat reset complete!")
+
     def append_to_input(self, char: str):
         """Add character to current input buffer"""
         self.current_input += char
