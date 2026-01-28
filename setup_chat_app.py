@@ -90,6 +90,10 @@ def _create_container(project):
     container.nodeY = 400
     container.color = (0.3, 0.7, 0.5)
 
+    # Set container layout dimensions from global context
+    container.par.w = GLOBAL_CONTEXT.width
+    container.par.h = GLOBAL_CONTEXT.height
+
     # Initialize ChatManager (force module reload to get latest code)
     import importlib
     import sys
@@ -116,6 +120,7 @@ def _create_container(project):
     container.store('chat_manager', chat_manager)
 
     print(f"OK Container created: {container.path}")
+    print(f"  - Resolution: {GLOBAL_CONTEXT.width}x{GLOBAL_CONTEXT.height}")
     return container
 
 
@@ -194,47 +199,54 @@ def _create_spec_generator(container):
 # ============================================
 
 def _create_text_display(container, spec_dat):
-    """Create Text TOP that renders from specification DAT"""
+    """Create Text COMP that renders from specification DAT with per-row colors"""
 
     print("\n[2/4] Creating text display...")
 
-    # Create Text TOP
-    text_top = container.create(textTOP, 'chat_display')
+    in_top = container.op('in1')
+
+    # Create Text COMP (supports per-row font colors in spec DAT)
+    text_comp = container.create(textCOMP, 'chat_display')
 
     # Resolution (from global context)
-    text_top.par.resolutionw = GLOBAL_CONTEXT.width
-    text_top.par.resolutionh = GLOBAL_CONTEXT.height
-    text_top.par.outputresolution = GLOBAL_CONTEXT.output_res
-    text_top.par.outputaspect = GLOBAL_CONTEXT.output_aspect
+    text_comp.par.w = GLOBAL_CONTEXT.width
+    text_comp.par.h = GLOBAL_CONTEXT.height
+
+    # Background TOP (composite text over background from container input)
+    text_comp.par.top = in_top
 
     # Specification DAT mode
-    text_top.par.text = ''
-    text_top.par.specdat = spec_dat.path
-
-    # Transparent background (alpha = 0)
-    text_top.par.bgalpha = 0
+    text_comp.par.mode = 'specdat'
+    text_comp.par.specdat = spec_dat.path
 
     # Word wrap
-    text_top.par.wordwrap = True
+    text_comp.par.wordwrap = True
 
     # Font settings
-    text_top.par.fontsizex = 24
-    text_top.par.fontsizey = 24
+    text_comp.par.fontsize = 24
 
     # Alignment
-    text_top.par.alignx = 'left'
-    text_top.par.aligny = 'top'
+    text_comp.par.alignx = 'left'
+    text_comp.par.aligny = 'top'
 
     # Position in network
-    text_top.nodeX = 0
-    text_top.nodeY = -200
+    text_comp.nodeX = 0
+    text_comp.nodeY = -200
 
-    print(f"  OK Created: {text_top.path}")
-    print(f"    - Resolution: {GLOBAL_CONTEXT.width}x{GLOBAL_CONTEXT.height}, outputresolution: {GLOBAL_CONTEXT.output_res}")
+    # Get the internal output TOP (needed for connecting to container output)
+    text_output = text_comp.op('out1')
+
+    if not text_output:
+        print("  WARNING: Could not find out1 inside Text COMP")
+
+    print(f"  OK Created: {text_comp.path}")
+    print(f"    - Resolution: {GLOBAL_CONTEXT.width}x{GLOBAL_CONTEXT.height}")
     print(f"    - Reading spec from: {spec_dat.path}")
-    print(f"    - Transparent background for compositing")
+    print(f"    - Background TOP: {in_top.path}")
+    print(f"    - Per-row font colors enabled")
+    print(f"    - Output TOP: {text_output.path if text_output else 'NOT FOUND'}")
 
-    return text_top
+    return text_comp
 
 
 # ============================================
@@ -270,10 +282,6 @@ def _create_keyboard_input(container, spec_dat):
 def onKey(dat, key, character, alt, lAlt, rAlt, ctrl, lCtrl, rCtrl, shift, lShift, rShift, state, time):
     """Handle key press events"""
 
-    # Only process key press (not release)
-    if not state:
-        return
-
     parent_comp = op('..')
     chat_manager = parent_comp.fetch('chat_manager', None)
     table_dat = parent_comp.op('chat_spec_generator')
@@ -284,26 +292,28 @@ def onKey(dat, key, character, alt, lAlt, rAlt, ctrl, lCtrl, rCtrl, shift, lShif
     # Import config for colors
     from chat_config import CHAT_CONFIG
 
-    # Handle special keys
-    if key == 'return':
-        # Submit input via ChatManager
-        chat_manager.submit_input()
-        _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+    # Process key press (state=True) and key repeat events
+    if state:
+        # Handle special keys
+        if key == 'return':
+            # Submit input via ChatManager
+            chat_manager.submit_input()
+            _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
 
-    elif key == 'backspace':
-        # Remove last character
-        chat_manager.backspace_input()
-        _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+        elif key == 'backspace':
+            # Remove last character
+            chat_manager.backspace_input()
+            _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
 
-    elif key == 'escape':
-        # Clear input
-        chat_manager.clear_input()
-        _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+        elif key == 'escape':
+            # Clear input
+            chat_manager.clear_input()
+            _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
 
-    elif character and character.isprintable():
-        # Add character
-        chat_manager.append_to_input(character)
-        _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+        elif character and character.isprintable():
+            # Add character
+            chat_manager.append_to_input(character)
+            _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
 
 def _regenerate_table(chat_manager, table_dat, config):
     """Regenerate the entire specification table from ChatManager"""
@@ -332,6 +342,9 @@ def _regenerate_table(chat_manager, table_dat, config):
             config["font_size"],
             color[0], color[1], color[2]
         ])
+
+    # Force cook to ensure display updates immediately
+    table_dat.cook(force=True)
 '''
 
     callbacks_dat.text = callback_code
@@ -348,40 +361,24 @@ def _regenerate_table(chat_manager, table_dat, config):
 # ============================================
 
 def _create_output(container):
-    """Create Over TOP to composite chat over background, then output"""
+    """Create container output connected to chat_display"""
 
-    print("\n[4/4] Creating Over TOP composite and output...")
+    print("\n[4/4] Creating container output...")
 
-    in_top = container.op('in1')
-    text_top = container.op('chat_display')
+    text_comp = container.op('chat_display')
 
-    # Create Over TOP for compositing
-    over_top = container.create(overTOP, 'chat_composite')
+    # Get the internal output TOP from Text COMP
+    text_output = text_comp.op('out1') if text_comp else None
 
-    # Resolution (from global context - MUST match all other components)
-    over_top.par.resolutionw = GLOBAL_CONTEXT.width
-    over_top.par.resolutionh = GLOBAL_CONTEXT.height
-    over_top.par.outputresolution = GLOBAL_CONTEXT.output_res
-    over_top.par.outputaspect = GLOBAL_CONTEXT.output_aspect
-
-    # Input 0 = Overlay Layer (chat text on top)
-    # Input 1 = Fixed Layer (background from container input)
-    over_top.inputConnectors[0].connect(text_top)
-    over_top.inputConnectors[1].connect(in_top)
-
-    over_top.nodeX = 0
-    over_top.nodeY = -300
-
-    print(f"  OK Created Over TOP: {over_top.path}")
-    print(f"    - Resolution: {GLOBAL_CONTEXT.width}x{GLOBAL_CONTEXT.height}, outputresolution: {GLOBAL_CONTEXT.output_res}")
-    print(f"    - Input 0 (Overlay): {text_top.path}")
-    print(f"    - Input 1 (Fixed): {in_top.path} (container input)")
+    if not text_output:
+        print("  ERROR: Could not find Text COMP output TOP (out1)")
+        return None
 
     # Create Out TOP for container output
     out_top = container.create(outTOP, 'out1')
-    out_top.inputConnectors[0].connect(over_top)
+    out_top.inputConnectors[0].connect(text_output)
     out_top.nodeX = 0
-    out_top.nodeY = -500
+    out_top.nodeY = -300
 
     # Make the container display its output when viewed
     container.viewer = True
@@ -392,7 +389,9 @@ def _create_output(container):
     out_top.viewer = True
 
     print(f"  OK Created Out TOP: {out_top.path}")
-    print(f"    - Container now has output connector")
+    print(f"    - Input: {text_output.path}")
+    print(f"    - Container output connector ready")
+    print(f"    - Text COMP composites text over background internally")
 
     return out_top
 
@@ -417,9 +416,10 @@ def _print_completion_message(container):
     print(f"  1. Connect background_simple -> {container.path} input connector (with mouse)")
     print(f"  2. Create viewer and connect {container.path} output connector to it (optional)")
     print("\nArchitecture:")
-    print(f"  - Inside container: in1 -> Over TOP <- chat_display -> out1")
+    print(f"  - Inside container: in1 -> chat_display (as background) -> out1")
+    print(f"  - Text COMP composites text over background internally")
     print(f"  - Container has input/output connectors (MediaPipe style)")
-    print(f"  - All components use outputresolution='fit' from global_context.py")
+    print(f"  - Per-row font colors enabled via specification DAT")
     print("\nHow to use:")
     print("  1. Click on 'chat_view' in project1")
     print("  2. Click anywhere to focus TouchDesigner window")
