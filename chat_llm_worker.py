@@ -1,6 +1,6 @@
 """
-TouchDesigner Chat LLM Worker
-Background thread for non-blocking LLM inference
+Chat LLM Worker - Background thread for LLM inference
+Prevents UI freezing during LLM calls (which can take up to 2 minutes)
 """
 
 import threading
@@ -9,15 +9,8 @@ from typing import Callable, Optional
 
 class ChatLLMWorker(threading.Thread):
     """
-    Background thread for non-blocking LLM inference
-
-    This prevents TouchDesigner's UI from freezing during LLM calls,
-    which can take up to 2 minutes.
-
-    Thread Safety:
-    - Only modifies Python data structures (via callbacks)
-    - Does NOT directly manipulate TouchDesigner operators
-    - Callbacks trigger UI updates through ChatManager
+    Background thread that calls LLM and provides callbacks
+    Supports both streaming and non-streaming modes
     """
 
     def __init__(
@@ -29,81 +22,71 @@ class ChatLLMWorker(threading.Thread):
         streaming_callback: Optional[Callable[[str, str], None]] = None
     ):
         """
-        Initialize LLM worker thread
-
         Args:
-            llm_interface: ChatInterface from llm package
+            llm_interface: LLM interface from llm package
             user_message: User's message to send
-            config: Configuration dictionary
-            callback: Called on completion with (response, success)
-            streaming_callback: Called for each chunk with (chunk, full_text)
+            config: Configuration dict
+            callback: Called when complete - callback(final_text, success)
+            streaming_callback: Optional - called per chunk - callback(chunk, accumulated_text)
         """
-        super().__init__(daemon=True)  # Daemon ensures cleanup on TD exit
+        # daemon=True ensures thread cleanup on TD exit
+        super().__init__(daemon=True)
+
         self.llm_interface = llm_interface
         self.user_message = user_message
         self.config = config
         self.callback = callback
         self.streaming_callback = streaming_callback
-        self.accumulated_text = ""
 
     def run(self):
-        """
-        Execute LLM inference in background thread
-
-        This method runs in a separate thread and should not directly
-        manipulate TouchDesigner operators.
-        """
+        """Execute in background thread"""
         try:
-            if self.config["streaming_enabled"] and self.streaming_callback:
-                # Streaming mode - incremental updates
+            if self.streaming_callback and self.config.get("streaming_enabled", True):
+                # Streaming mode
                 self._run_streaming()
             else:
-                # Non-streaming mode - single response
-                self._run_non_streaming()
-
+                # Non-streaming mode
+                self._run_blocking()
         except Exception as e:
-            # Catch all exceptions and report via callback
-            error_msg = f"LLM inference error: {str(e)}"
-            self.callback(error_msg, False)
+            print(f"LLM Worker Error: {e}")
+            self.callback(str(e), False)
 
     def _run_streaming(self):
-        """Run streaming inference"""
-        inference_config = {
-            "max_tokens": self.config["max_tokens"],
-            "temperature": self.config["temperature"]
-        }
+        """Run in streaming mode (incremental text display)"""
+        accumulated_text = ""
 
-        # Stream chunks as they arrive
-        for chunk in self.llm_interface.send_message_stream(
-            self.user_message,
-            inference_config
-        ):
-            self.accumulated_text += chunk
+        try:
+            # Call LLM with streaming
+            for chunk in self.llm_interface.send_message_stream(self.user_message):
+                # Accumulate text
+                if isinstance(chunk, dict) and "data" in chunk:
+                    chunk_text = chunk["data"].get("response", "")
+                    accumulated_text += chunk_text
 
-            # Call streaming callback with chunk and full text
-            if self.streaming_callback:
-                self.streaming_callback(chunk, self.accumulated_text)
+                    # Call streaming callback
+                    if self.streaming_callback:
+                        self.streaming_callback(chunk_text, accumulated_text)
 
-        # Final callback when complete
-        self.callback(self.accumulated_text, True)
+            # Call final callback with full text
+            self.callback(accumulated_text, True)
 
-    def _run_non_streaming(self):
-        """Run non-streaming inference"""
-        inference_config = {
-            "max_tokens": self.config["max_tokens"],
-            "temperature": self.config["temperature"]
-        }
+        except Exception as e:
+            print(f"Streaming error: {e}")
+            self.callback(str(e), False)
 
-        # Single blocking call
-        result = self.llm_interface.send_message(
-            self.user_message,
-            inference_config
-        )
+    def _run_blocking(self):
+        """Run in blocking mode (wait for full response)"""
+        try:
+            # Call LLM (blocks until complete)
+            result = self.llm_interface.send_message(self.user_message)
 
-        # Check result and call callback
-        if result["success"]:
-            response = result["data"]["response"]
-            self.callback(response, True)
-        else:
-            error_msg = result["error"]
-            self.callback(error_msg, False)
+            # Extract response text
+            if isinstance(result, dict) and "data" in result:
+                response_text = result["data"].get("response", "")
+                self.callback(response_text, True)
+            else:
+                self.callback(str(result), True)
+
+        except Exception as e:
+            print(f"LLM error: {e}")
+            self.callback(str(e), False)
