@@ -49,15 +49,15 @@ def setup_chat_application():
     # Create operators
     keyboard_chop = _create_keyboard_input(chat_container)
     execute_dat = _create_keyboard_callbacks(chat_container, keyboard_chop)
-    python_dat = _create_spec_generator(chat_container)
-    table_dat = _create_spec_table(chat_container, python_dat)
-    text_top = _create_text_display(chat_container, table_dat)
-    out_null = _create_output(chat_container, text_top)
+    spec_dat = _create_spec_generator(chat_container)
+    text_top = _create_text_display(chat_container, spec_dat)
+    over_top = _create_compositor(chat_container, text_top)
+    out_null = _create_output(chat_container, over_top)
 
     # Layout operators
     _layout_operators(
-        keyboard_chop, execute_dat, python_dat,
-        table_dat, text_top, out_null
+        keyboard_chop, execute_dat, spec_dat,
+        text_top, over_top, out_null
     )
 
     print("✓ Chat application created successfully!")
@@ -108,22 +108,39 @@ def _add_custom_parameters(container):
     p.normMin = 5
     p.normMax = 100
 
-    # Color parameters
-    p = page.appendRGB('Usercolor', label='User Color')[0]
-    p.default = (0.2, 0.8, 1.0)
+    # Color parameters - RGB creates 3 separate params (r, g, b)
+    page.appendRGB('Usercolor', label='User Color')
+    container.par.Usercolorr.default = 0.2
+    container.par.Usercolorg.default = 0.8
+    container.par.Usercolorb.default = 1.0
+    container.par.Usercolorr.val = 0.2
+    container.par.Usercolorg.val = 0.8
+    container.par.Usercolorb.val = 1.0
 
-    p = page.appendRGB('Assistantcolor', label='Assistant Color')[0]
-    p.default = (1.0, 1.0, 1.0)
+    page.appendRGB('Assistantcolor', label='Assistant Color')
+    container.par.Assistantcolorr.default = 1.0
+    container.par.Assistantcolorg.default = 1.0
+    container.par.Assistantcolorb.default = 1.0
+    container.par.Assistantcolorr.val = 1.0
+    container.par.Assistantcolorg.val = 1.0
+    container.par.Assistantcolorb.val = 1.0
 
-    p = page.appendRGB('Systemcolor', label='System Color')[0]
-    p.default = (0.8, 0.8, 0.8)
+    page.appendRGB('Systemcolor', label='System Color')
+    container.par.Systemcolorr.default = 0.8
+    container.par.Systemcolorg.default = 0.8
+    container.par.Systemcolorb.default = 0.8
+    container.par.Systemcolorr.val = 0.8
+    container.par.Systemcolorg.val = 0.8
+    container.par.Systemcolorb.val = 0.8
 
     # LLM parameters
     p = page.appendStr('Ollamamodel', label='Ollama Model')[0]
     p.default = "llama3.2"
+    p.val = "llama3.2"
 
     p = page.appendToggle('Streamingenabled', label='Enable Streaming')[0]
     p.default = True
+    p.val = True
 
     p = page.appendInt('Maxtokens', label='Max Tokens')[0]
     p.default = 512
@@ -149,12 +166,13 @@ def _create_keyboard_input(container):
 def _create_keyboard_callbacks(container, keyboard_chop):
     """Create Execute DAT with keyboard callbacks"""
 
-    execute_dat = container.create(executeDAT, 'keyboard_callbacks')
+    execute_dat = container.create(chopexecuteDAT, 'keyboard_callbacks')
     execute_dat.color = (0.6, 0.3, 0.8)
     execute_dat.comment = "Keyboard event handlers"
 
-    # Set up Execute DAT to monitor keyboard CHOP
-    execute_dat.par.chopexecute = keyboard_chop
+    # Set up CHOP Execute DAT to monitor keyboard CHOP
+    execute_dat.par.chop = keyboard_chop
+    execute_dat.par.valuechange = True
 
     # Embed callback code
     callback_code = '''# Keyboard callbacks for chat application
@@ -215,9 +233,9 @@ def onValueChange(channel, sampleIndex, val, prev):
     elif key_name == 'space':
         chat_manager.append_to_input(' ')
 
-    # Force Python DAT to update
+    # Force spec DAT to update
     try:
-        op('chat_spec_generator').cook(force=True)
+        op('chat_spec_table').cook(force=True)
     except:
         pass
 '''
@@ -228,12 +246,12 @@ def onValueChange(channel, sampleIndex, val, prev):
 
 
 def _create_spec_generator(container):
-    """Create Python DAT for specification table generation"""
+    """Create DAT for specification table generation"""
 
-    python_dat = container.create(textDAT, 'chat_spec_generator')
-    python_dat.par.extension = 'py'
-    python_dat.color = (0.3, 0.6, 0.8)
-    python_dat.comment = "Generates text rendering spec"
+    spec_dat = container.create(textDAT, 'chat_spec_table')
+    spec_dat.par.extension = 'dat'
+    spec_dat.color = (0.3, 0.6, 0.8)
+    spec_dat.comment = "Text rendering specification"
 
     # Embed spec generation code
     spec_code = '''# Specification table generator for Text TOP
@@ -267,38 +285,20 @@ else:
     print("x\\ty\\ttext\\tfontsize\\tfontcolorr\\tfontcolorg\\tfontcolorb")
 '''
 
-    python_dat.text = spec_code
+    spec_dat.text = spec_code
 
-    return python_dat
-
-
-def _create_spec_table(container, python_dat):
-    """Create Table DAT for text specification"""
-
-    table_dat = container.create(tableDAT, 'chat_spec_table')
-    table_dat.par.dat = python_dat
-    table_dat.color = (0.4, 0.7, 0.4)
-    table_dat.comment = "Text rendering specification"
-
-    return table_dat
+    return spec_dat
 
 
-def _create_text_display(container, table_dat):
+def _create_text_display(container, spec_dat):
     """Create Text TOP for rendering"""
 
     text_top = container.create(textTOP, 'chat_display')
     text_top.color = (0.8, 0.4, 0.4)
-    text_top.comment = "Text rendering over background"
+    text_top.comment = "Text rendering"
 
     # Configure Text TOP
-    text_top.par.specdat = table_dat
-
-    # Get background reference
-    bg_out = op('/project1/background_simple/OUT')
-    text_top.setInput(0, bg_out)
-
-    # Enable comp over input
-    text_top.par.compoverinput = True
+    text_top.par.specdat = spec_dat
 
     # Text display settings
     text_top.par.fontsizex = 24
@@ -308,18 +308,48 @@ def _create_text_display(container, table_dat):
     return text_top
 
 
-def _create_output(container, text_top):
+def _create_compositor(container, text_top):
+    """Create Over TOP to composite text over background"""
+
+    over_top = container.create(overTOP, 'compositor')
+    over_top.color = (0.5, 0.7, 0.5)
+    over_top.comment = "Composite text over background"
+
+    # Get background
+    bg_out = op('/project1/background_simple/OUT')
+
+    # Over TOP structure:
+    # - Input 0: Bottom layer (background)
+    # - Input 1: Top layer (text to overlay)
+    # OR use operand parameter for top layer
+
+    # Connect background to input 0
+    try:
+        over_top.inputConnectors[0].connect(bg_out)
+    except:
+        print("Could not connect background to Over TOP")
+
+    # Set text as operand (top layer)
+    over_top.par.operand = text_top
+
+    return over_top
+
+
+def _create_output(container, compositor):
     """Create output NULL TOP"""
 
     out_null = container.create(nullTOP, 'OUT')
-    out_null.setInput(0, text_top)
+
+    # Connect compositor output
+    out_null.inputConnectors[0].connect(compositor)
+
     out_null.color = (0.4, 0.4, 0.8)
     out_null.comment = "Final composite output"
 
     return out_null
 
 
-def _layout_operators(keyboard, execute, python, table, text, output):
+def _layout_operators(keyboard, execute, spec_dat, text, compositor, output):
     """Arrange operators in network view"""
 
     # Top row - input handling
@@ -332,19 +362,19 @@ def _layout_operators(keyboard, execute, python, table, text, output):
     execute.nodeWidth = 150
 
     # Middle row - spec generation
-    python.nodeX = -100
-    python.nodeY = -100
-    python.nodeWidth = 150
-
-    table.nodeX = 100
-    table.nodeY = -100
+    spec_dat.nodeX = -100
+    spec_dat.nodeY = -100
+    spec_dat.nodeWidth = 150
 
     # Bottom row - rendering
     text.nodeX = 0
     text.nodeY = -200
 
+    compositor.nodeX = 0
+    compositor.nodeY = -300
+
     output.nodeX = 0
-    output.nodeY = -300
+    output.nodeY = -400
 
 
 # Execute
