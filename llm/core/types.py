@@ -1,7 +1,6 @@
 """Type definitions, protocols, and interfaces for the LLM system."""
 
-from typing import Any, Iterator, Literal, Optional, Protocol
-from typing_extensions import TypedDict
+from typing import Any, Iterator, Literal, Optional, Protocol, TypedDict
 
 
 # Result type following the MCP pattern
