@@ -4,7 +4,7 @@ Manages message list, input buffer, positioning, and LLM integration
 """
 
 import time
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Callable
 
 
 class Message:
@@ -29,10 +29,11 @@ class ChatManager:
     Coordinates with LLM worker threads for responses
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, on_update_callback: Optional[Callable[[], None]] = None):
         """
         Args:
             config: Configuration dictionary from chat_config.py
+            on_update_callback: Optional callback to trigger display refresh after message updates
         """
         self.config = config
         self.messages: List[Message] = []
@@ -40,6 +41,7 @@ class ChatManager:
         self.llm_interface = None
         self.llm_worker = None  # Reference to current worker thread
         self.awaiting_username = True  # First message will determine username
+        self.on_update_callback = on_update_callback  # Callback for display refresh
 
     def initialize_llm(self):
         """Initialize LLM from existing llm/ package"""
@@ -51,6 +53,14 @@ class ChatManager:
         except Exception as e:
             print(f"ERROR: Failed to initialize LLM: {e}")
             self.llm_interface = None
+
+    def _notify_update(self):
+        """Call the update callback if registered (for display refresh after LLM responses)"""
+        if self.on_update_callback:
+            try:
+                self.on_update_callback()
+            except Exception as e:
+                print(f"Update callback error: {e}")
 
     def add_initial_message(self):
         """Add the initial bot greeting message"""
@@ -224,6 +234,8 @@ Output ONLY the name:"""
                 self.add_user_message(f"{self.config['user_name']}: {user_response}")
                 self.add_assistant_message(f"{self.config['bot_name']}: Nice to meet you!")
 
+            self._notify_update()  # Trigger display refresh after username extraction
+
         # Spawn worker thread (no streaming for name extraction)
         worker = ChatLLMWorker(
             llm_interface=self.llm_interface,
@@ -252,6 +264,7 @@ Output ONLY the name:"""
         def on_chunk(chunk_text: str, full_text: str):
             """Called when streaming chunk arrives"""
             self.update_last_assistant_message(f"{bot_name}: {full_text}")
+            self._notify_update()  # Trigger display refresh
 
         def on_complete(final_text: str, success: bool):
             """Called when response complete"""
@@ -259,6 +272,7 @@ Output ONLY the name:"""
                 self.update_last_assistant_message(f"{bot_name}: {final_text}")
             else:
                 self.update_last_assistant_message(f"{bot_name}: [Error: {final_text}]")
+            self._notify_update()  # Trigger display refresh
 
         # Spawn worker thread
         worker = ChatLLMWorker(
