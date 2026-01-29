@@ -66,6 +66,9 @@ class OllamaInferenceEngine:
         if config.get("stop"):
             payload["options"]["stop"] = config["stop"]
 
+        # Debug: Show prompt preview to verify correct prompts are being used
+        print(f"[OLLAMA] Prompt preview ({len(prompt)} chars): {prompt[:300]}...")
+
         try:
             response = requests.post(
                 f"{base_url}/api/generate",
@@ -130,6 +133,9 @@ class OllamaInferenceEngine:
         # Add stop sequences if provided
         if config.get("stop"):
             payload["options"]["stop"] = config["stop"]
+
+        # Debug: Show prompt preview to verify correct prompts are being used
+        print(f"[OLLAMA STREAM] Prompt preview ({len(prompt)} chars): {prompt[:300]}...")
 
         try:
             response = requests.post(

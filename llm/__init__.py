@@ -44,7 +44,8 @@ from .main import (
     initialize_llm,
     get_chat_interface,
     chat,
-    shutdown_llm
+    shutdown_llm,
+    reset_llm
 )
 from .api import ChatInterface
 from .core.types import ModelConfig, InferenceConfig
@@ -57,6 +58,7 @@ __all__ = [
     "get_chat_interface",
     "chat",
     "shutdown_llm",
+    "reset_llm",
     "ChatInterface",
     "ModelConfig",
     "InferenceConfig",
