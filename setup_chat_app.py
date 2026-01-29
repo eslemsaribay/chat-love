@@ -36,7 +36,19 @@ def setup_chat_app():
     # Setup components
     python_dat = _create_spec_generator(container)
     _create_text_display(container, python_dat)
-    _create_keyboard_input(container, python_dat)
+    keyboard_dat, callbacks_dat = _create_keyboard_input(container, python_dat)
+
+    # Setup panel callbacks for mouse wheel / touchpad scrolling on the text COMP
+    text_comp = container.op('chat_display')
+    if text_comp:
+        try:
+            # Enable panel interact mode and set wheel callback
+            text_comp.par.enablepanel = True
+            text_comp.par.wheelcallbacks = callbacks_dat.path
+            print(f"\n  OK Mouse/touchpad scroll enabled on text display")
+        except AttributeError as e:
+            print(f"\n  Note: Could not enable wheel callbacks: {e}")
+            print(f"        Use arrow keys (Up/Down) for scrolling")
 
     # Done
     _print_completion_message(container)
@@ -94,19 +106,35 @@ def _regenerate_table_from_manager(chat_manager, table_dat, config):
     line_height = config.get("line_height", 20)
 
     # Visible window bounds (for clipping)
+    # TouchDesigner Y-axis: Y=0 at bottom, increases upward
     canvas_height = config["canvas_height"]
-    window_top = config.get("chat_window_top", config["chat_y"])
+    window_top_px = config.get("chat_window_top", config["chat_y"])  # Distance from top of canvas
     window_height = config.get("chat_window_height", 400)
-    window_bottom = window_top + window_height
+
+    # Convert to TD coordinates (Y from bottom)
+    window_top_y = canvas_height - window_top_px  # Top of visible area (high Y)
+    window_bottom_y = canvas_height - (window_top_px + window_height)  # Bottom of visible area (low Y)
 
     # Get scroll offset from chat manager
     scroll_offset = getattr(chat_manager, 'scroll_offset', 0)
 
-    # Calculate starting Y with scroll offset applied
-    base_y = canvas_height - window_top
-    current_y = base_y + scroll_offset
+    # Get all messages and calculate total lines
+    messages = chat_manager.get_display_messages()
+    total_lines = 0
+    message_lines = []  # List of (msg, wrapped_lines)
+    for msg in messages:
+        wrapped = _wrap_text(msg.text, wrap_chars)
+        message_lines.append((msg, wrapped))
+        total_lines += len(wrapped)
 
-    for msg in chat_manager.get_display_messages():
+    # ANCHOR FROM BOTTOM: Position content so input (last line) is at window bottom when scroll_offset=0
+    # First line Y = window_bottom_y + (total_lines - 1) * line_height
+    # Last line Y = window_bottom_y
+    # Scroll offset SUBTRACTS from Y, moving content DOWN, revealing older messages from above
+    first_line_y = window_bottom_y + (total_lines - 1) * line_height
+    current_y = first_line_y - scroll_offset
+
+    for msg, wrapped_lines in message_lines:
         if msg.role == "user":
             color = config["user_color"]
         elif msg.role == "input":
@@ -114,21 +142,15 @@ def _regenerate_table_from_manager(chat_manager, table_dat, config):
         else:
             color = config["assistant_color"]
 
-        # Wrap the message text into multiple lines
-        wrapped_lines = _wrap_text(msg.text, wrap_chars)
-
         for line in wrapped_lines:
-            # Convert Y to screen space for bounds checking
-            screen_y_from_top = canvas_height - current_y
-
-            # Only add row if within visible window
-            if window_top <= screen_y_from_top <= window_bottom:
+            # Only add row if within visible window (TD Y coordinates)
+            if window_bottom_y <= current_y <= window_top_y:
                 table_dat.appendRow([
                     config["chat_x"], current_y, line,
                     config["font_size"], color[0], color[1], color[2]
                 ])
 
-            current_y -= line_height  # Move down for next line
+            current_y -= line_height  # Move down for next line (lower Y)
 
     table_dat.cook(force=True)
 
@@ -362,10 +384,6 @@ def _wrap_text(text, max_chars=60):
 def onKey(dat, key, character, alt, lAlt, rAlt, ctrl, lCtrl, rCtrl, shift, lShift, rShift, state, time):
     """Handle key press events"""
 
-    # Debug: confirm callback is triggered
-    if state:
-        print(f"KEY: {key}, char: {character}")
-
     try:
         parent_comp = op('..')
         chat_manager = parent_comp.fetch('chat_manager', None)
@@ -401,12 +419,12 @@ def onKey(dat, key, character, alt, lAlt, rAlt, ctrl, lCtrl, rCtrl, shift, lShif
                 chat_manager.reset()
                 _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
 
-            elif key == 'pageup':
+            elif key == 'up':
                 # Scroll up to see older messages
                 chat_manager.scroll_up()
                 _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
 
-            elif key == 'pagedown':
+            elif key == 'down':
                 # Scroll down to see newer messages
                 chat_manager.scroll_down()
                 _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
@@ -443,22 +461,35 @@ def _regenerate_table(chat_manager, table_dat, config):
     line_height = config.get("line_height", 30)
 
     # Visible window bounds (for clipping)
+    # TouchDesigner Y-axis: Y=0 at bottom, increases upward
     canvas_height = config["canvas_height"]
-    window_top = config.get("chat_window_top", config["chat_y"])
+    window_top_px = config.get("chat_window_top", config["chat_y"])  # Distance from top of canvas
     window_height = config.get("chat_window_height", 400)
-    window_bottom = window_top + window_height
+
+    # Convert to TD coordinates (Y from bottom)
+    window_top_y = canvas_height - window_top_px  # Top of visible area (high Y)
+    window_bottom_y = canvas_height - (window_top_px + window_height)  # Bottom of visible area (low Y)
 
     # Get scroll offset from chat manager
     scroll_offset = getattr(chat_manager, 'scroll_offset', 0)
 
-    # Calculate starting Y with scroll offset applied
-    base_y = canvas_height - window_top
-    current_y = base_y + scroll_offset
-
-    # Get all display messages
+    # Get all display messages and calculate total lines
     messages = chat_manager.get_display_messages()
-
+    total_lines = 0
+    message_lines = []  # List of (msg, wrapped_lines)
     for msg in messages:
+        wrapped = _wrap_text(msg.text, wrap_chars)
+        message_lines.append((msg, wrapped))
+        total_lines += len(wrapped)
+
+    # ANCHOR FROM BOTTOM: Position content so input (last line) is at window bottom when scroll_offset=0
+    # First line Y = window_bottom_y + (total_lines - 1) * line_height
+    # Last line Y = window_bottom_y
+    # Scroll offset SUBTRACTS from Y, moving content DOWN, revealing older messages from above
+    first_line_y = window_bottom_y + (total_lines - 1) * line_height
+    current_y = first_line_y - scroll_offset
+
+    for msg, wrapped_lines in message_lines:
         # Determine color based on role
         if msg.role == "user":
             color = config["user_color"]
@@ -467,15 +498,9 @@ def _regenerate_table(chat_manager, table_dat, config):
         else:  # assistant
             color = config["assistant_color"]
 
-        # Wrap text into multiple lines
-        wrapped_lines = _wrap_text(msg.text, wrap_chars)
-
         for line in wrapped_lines:
-            # Convert Y to screen space for bounds checking
-            screen_y_from_top = canvas_height - current_y
-
-            # Only add row if within visible window
-            if window_top <= screen_y_from_top <= window_bottom:
+            # Only add row if within visible window (TD Y coordinates)
+            if window_bottom_y <= current_y <= window_top_y:
                 table_dat.appendRow([
                     config["chat_x"],
                     current_y,
@@ -484,10 +509,38 @@ def _regenerate_table(chat_manager, table_dat, config):
                     color[0], color[1], color[2]
                 ])
 
-            current_y -= line_height  # Move down for next line
+            current_y -= line_height  # Move down for next line (lower Y)
 
     # Force cook to ensure display updates immediately
     table_dat.cook(force=True)
+
+def onWheel(comp, wheelDelta, x, y, buttons, ext):
+    """Handle mouse wheel / touchpad scroll events"""
+    try:
+        parent_comp = comp.parent()
+        chat_manager = parent_comp.fetch('chat_manager', None)
+        table_dat = parent_comp.op('chat_spec_generator')
+
+        if not chat_manager or not table_dat:
+            return
+
+        from chat_config import CHAT_CONFIG
+
+        # wheelDelta is positive when scrolling up, negative when scrolling down
+        # Invert the logic: scroll up = see older messages (increase offset)
+        if wheelDelta > 0:
+            # Mouse wheel up / touchpad scroll up = see older messages
+            chat_manager.scroll_up()
+        else:
+            # Mouse wheel down / touchpad scroll down = see newer messages
+            chat_manager.scroll_down()
+
+        _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+
+    except Exception as e:
+        print(f"ERROR in wheel callback: {e}")
+        import traceback
+        traceback.print_exc()
 '''
 
     callbacks_dat.text = callback_code
@@ -534,6 +587,12 @@ def _print_completion_message(container):
     print("  - BACKSPACE: Delete last character")
     print("  - ESC: Clear input")
     print("  - F5: Reset chat (clear all messages, context, username)")
+    print("\nScroll controls:")
+    print("  - UP ARROW: Scroll up to see older messages")
+    print("  - DOWN ARROW: Scroll down to see newer messages")
+    print("  - HOME: Jump to oldest messages")
+    print("  - END: Jump to newest messages")
+    print("  - MOUSE WHEEL / TOUCHPAD: Scroll through messages")
     print("\nNote: Username will be extracted from first message")
     print("=" * 60)
 

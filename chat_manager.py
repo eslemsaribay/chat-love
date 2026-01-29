@@ -64,14 +64,26 @@ class ChatManager:
                 print(f"Update callback error: {e}")
 
     def add_initial_message(self):
-        """Add the initial bot greeting message"""
+        """Add the initial bot greeting message (to both display and LLM context)"""
         bot_name = self.config["bot_name"]
         initial_msg = self.config["initial_message"]
-        self.add_assistant_message(f"{bot_name}: {initial_msg}")
+        full_msg = f"{bot_name}: {initial_msg}"
+
+        # Add to display
+        self.add_assistant_message(full_msg)
+
+        # Also add to LLM conversation context so it knows what it said
+        if self.llm_interface:
+            try:
+                self.llm_interface._conversation_manager.add_message("assistant", full_msg)
+                print(f"[CHAT] Initial message added to LLM context")
+            except Exception as e:
+                print(f"[CHAT] Warning: Could not add initial message to LLM context: {e}")
 
     def reset(self):
         """
         Reset the entire chat state:
+        - Reload config and LLM prompt modules
         - Clear all messages
         - Clear input buffer
         - Reset username to None
@@ -79,7 +91,23 @@ class ChatManager:
         - Clear LLM conversation context
         - Add initial bot greeting
         """
+        import sys
+        import importlib
+
         print("[CHAT RESET] Resetting chat state...")
+
+        # Reload chat config module
+        if 'chat_config' in sys.modules:
+            try:
+                importlib.reload(sys.modules['chat_config'])
+                print("[CHAT RESET] Reloaded: chat_config")
+            except Exception as e:
+                print(f"[CHAT RESET] Warning: Could not reload chat_config: {e}")
+
+        # Update config from reloaded module
+        from chat_config import CHAT_CONFIG
+        self.config.update(CHAT_CONFIG)
+        print("[CHAT RESET] Config updated from chat_config.py")
 
         # Clear local state
         self.messages = []
@@ -88,13 +116,38 @@ class ChatManager:
         self.awaiting_username = True
         self.scroll_offset = 0  # Reset scroll position
 
-        # Clear LLM conversation context if available
+        # FULL LLM RESET: Destroy singleton and recreate with fresh prompts
+        # This ensures prompt modules are reloaded and new ChatInterface is created
         if self.llm_interface:
             try:
-                self.llm_interface.clear_conversation()
-                print("[CHAT RESET] LLM context cleared")
+                # IMPORTANT: Save conversation and shutdown BEFORE reloading modules
+                # Otherwise the module reload resets _chat_interface to None and we lose the reference
+                print("[CHAT RESET] Saving conversation and shutting down LLM...")
+                shutdown_result = self.llm_interface.shutdown()
+                print(f"[CHAT RESET] Shutdown result: {shutdown_result}")
+
+                # Now reload the llm package to pick up any code changes
+                if 'llm' in sys.modules:
+                    # Reload prompt modules
+                    for mod in ['llm.prompts.system_instructions', 'llm.prompts.examples']:
+                        if mod in sys.modules:
+                            importlib.reload(sys.modules[mod])
+                            print(f"[CHAT RESET] Reloaded: {mod}")
+                    # Reload llm.main (where initialize_llm is defined)
+                    if 'llm.main' in sys.modules:
+                        importlib.reload(sys.modules['llm.main'])
+                    # Reload the package __init__ to update exports
+                    importlib.reload(sys.modules['llm'])
+
+                # Re-initialize LLM with fresh modules
+                from llm import initialize_llm, get_chat_interface
+                initialize_llm(model_path=self.config["ollama_model"])
+                self.llm_interface = get_chat_interface()
+                print("[CHAT RESET] LLM fully reset with fresh prompts")
             except Exception as e:
-                print(f"[CHAT RESET] Warning: Could not clear LLM context: {e}")
+                print(f"[CHAT RESET] Warning: Could not reset LLM: {e}")
+                import traceback
+                traceback.print_exc()
 
         # Add initial bot greeting
         self.add_initial_message()
@@ -120,19 +173,37 @@ class ChatManager:
     def scroll_up(self, pixels: int = None):
         """Scroll up to see older messages (increases scroll offset)"""
         step = pixels or self.config.get("scroll_step", 60)
-        self.scroll_offset += step
-        print(f"[SCROLL] Up by {step}px, offset now: {self.scroll_offset}")
+        max_scroll = self._calculate_max_scroll()
+        self.scroll_offset = min(max_scroll, self.scroll_offset + step)
 
     def scroll_down(self, pixels: int = None):
         """Scroll down to see newer messages (decreases scroll offset)"""
         step = pixels or self.config.get("scroll_step", 60)
         self.scroll_offset = max(0, self.scroll_offset - step)
-        print(f"[SCROLL] Down by {step}px, offset now: {self.scroll_offset}")
 
     def reset_scroll(self):
         """Reset scroll to bottom (most recent messages visible)"""
         self.scroll_offset = 0
-        print("[SCROLL] Reset to 0")
+
+    def _calculate_max_scroll(self):
+        """Calculate maximum scroll offset (prevents scrolling beyond top of content)"""
+        import textwrap
+
+        # Calculate total content height
+        wrap_chars = self.config.get("wrap_chars", 50)
+        line_height = self.config.get("line_height", 30)
+
+        total_lines = 0
+        for msg in self.get_display_messages():
+            wrapped = textwrap.wrap(msg.text, width=wrap_chars, break_long_words=True, break_on_hyphens=True) or [msg.text]
+            total_lines += len(wrapped)
+
+        total_content_height = total_lines * line_height
+        visible_height = self.config.get("chat_window_height", 400)
+
+        # Max scroll is when top of content aligns with top of window
+        max_scroll = max(0, total_content_height - visible_height)
+        return max_scroll
 
     def submit_input(self):
         """
@@ -177,6 +248,7 @@ class ChatManager:
         self.messages.append(msg)
         self._trim_messages()
         self._recalculate_positions()
+        self.reset_scroll()  # Auto-scroll to bottom when new message added
 
     def add_assistant_message(self, text: str):
         """Add assistant message to history"""
@@ -185,6 +257,7 @@ class ChatManager:
         self.messages.append(msg)
         self._trim_messages()
         self._recalculate_positions()
+        self.reset_scroll()  # Auto-scroll to bottom when new message added
 
     def update_last_assistant_message(self, text: str):
         """
@@ -193,9 +266,10 @@ class ChatManager:
         """
         if self.messages and self.messages[-1].role == "assistant":
             self.messages[-1].text = text
+            self._recalculate_positions()
+            self.reset_scroll()  # Auto-scroll to bottom during streaming
         else:
-            self.add_assistant_message(text)
-        self._recalculate_positions()
+            self.add_assistant_message(text)  # This already calls reset_scroll()
 
     def get_display_messages(self) -> List[Message]:
         """
@@ -395,6 +469,16 @@ Now extract the name from: "{user_response}"
                         try:
                             self.llm_interface.clear_conversation()
                             print("[USERNAME EXTRACTION] Cleared LLM context for fresh chat start")
+
+                            # RE-SEED conversation with intro context so LLM remembers the user
+                            # Otherwise LLM has no memory of who they're talking to
+                            bot_name = self.config['bot_name']
+                            initial_msg = self.config.get('initial_message', f"Hi, I'm {bot_name}! What's your name?")
+
+                            # Add to LLM conversation (not display - that's handled separately)
+                            self.llm_interface._conversation_manager.add_message("assistant", f"{bot_name}: {initial_msg}")
+                            self.llm_interface._conversation_manager.add_message("user", f"{name}: {user_response}")
+                            print(f"[USERNAME EXTRACTION] Re-seeded LLM context with intro (2 messages)")
                         except Exception as e:
                             print(f"[USERNAME EXTRACTION] Warning: Could not clear context: {e}")
 
@@ -405,8 +489,9 @@ Now extract the name from: "{user_response}"
                     # Add the user's message with extracted name
                     self.add_user_message(f"{name}: {user_response}")
 
-                    # Add greeting response
-                    self.add_assistant_message(f"{self.config['bot_name']}: Nice to meet you, {name}!")
+                    # Spawn LLM to generate a creative opening question
+                    # The LLM context is already seeded with the intro, so it knows the user's name
+                    self._spawn_llm_worker(f"(The user just introduced themselves as {name}. Greet them warmly and ask a creative, unexpected opening question to start an intimate conversation.)")
 
             self._notify_update()  # Trigger display refresh
 
@@ -441,13 +526,11 @@ Now extract the name from: "{user_response}"
         # Define callbacks
         def on_chunk(chunk_text: str, full_text: str):
             """Called when streaming chunk arrives"""
-            print(f"[LLM STREAM] Chunk received, total length: {len(full_text)}")
             self.update_last_assistant_message(f"{bot_name}: {full_text}")
             self._notify_update()  # Trigger display refresh
 
         def on_complete(final_text: str, success: bool):
             """Called when response complete"""
-            print(f"[LLM RESPONSE] success={success}, response='{final_text[:100]}{'...' if len(final_text) > 100 else ''}'")
             if success:
                 self.update_last_assistant_message(f"{bot_name}: {final_text}")
             else:
