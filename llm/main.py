@@ -117,11 +117,50 @@ def shutdown_llm() -> None:
         log_message("LLM not initialized, nothing to shutdown", LogLevel.WARNING)
 
 
+def reset_llm() -> ChatInterface:
+    """Force reset LLM - destroys singleton and recreates with fresh prompts.
+
+    Use this when you need to ensure prompts are reloaded from disk.
+    This destroys the existing ChatInterface and creates a new one.
+
+    Returns:
+        New ChatInterface instance with fresh prompts
+    """
+    global _chat_interface
+
+    log_message("Force resetting LLM system", LogLevel.INFO)
+
+    # Get model path from config
+    model_path = LLM_CONFIG.get("default_model_path")
+
+    # Shutdown existing instance (this saves the conversation log)
+    if _chat_interface is not None:
+        result = _chat_interface.shutdown()
+        print(f"[LLM RESET] Shutdown result: {result}")
+        if result.get("success") and result.get("data", {}).get("conversation_saved"):
+            print("[LLM RESET] Conversation log saved before reset")
+        else:
+            print(f"[LLM RESET] Warning: Conversation may not have been saved")
+        _chat_interface = None
+
+    # Force reload prompt modules to pick up any changes
+    import sys
+    import importlib
+    for mod_name in ['llm.prompts.system_instructions', 'llm.prompts.examples']:
+        if mod_name in sys.modules:
+            importlib.reload(sys.modules[mod_name])
+            log_message(f"Reloaded module: {mod_name}", LogLevel.DEBUG)
+
+    # Recreate the interface (initialize_llm will create new instance since _chat_interface is None)
+    return initialize_llm(model_path=model_path)
+
+
 # Public API exports
 __all__ = [
     "initialize_llm",
     "get_chat_interface",
     "chat",
     "shutdown_llm",
+    "reset_llm",
     "ChatInterface"
 ]
