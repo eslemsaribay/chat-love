@@ -22,7 +22,7 @@ CHAT_CONFIG = {
 
     # Scrolling settings
     "chat_window_top": 230,     # Top boundary of visible chat area (pixels from top)
-    "chat_window_height": 400,  # Visible height of chat area (pixels)
+    "chat_window_height": 330,  # Visible height of chat area (pixels)
     "scroll_step": 60,          # Pixels to scroll per Page Up/Down (3 lines × 20px)
 
     # Colors (RGB 0-1)
@@ -41,6 +41,6 @@ CHAT_CONFIG = {
     # LLM Settings
     "ollama_model": "llama3.2",
     "streaming_enabled": True,
-    "max_tokens": 512,
-    "temperature": 0.6,
+    "max_tokens": 512,  
+    "temperature": 0.65,  # Slightly more deterministic
 }
