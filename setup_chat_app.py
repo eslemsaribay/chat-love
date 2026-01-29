@@ -72,6 +72,16 @@ def _check_prerequisites(project):
 
 
 # ============================================
+# Helper: Text Wrapping
+# ============================================
+
+def _wrap_text(text, max_chars=60):
+    """Wrap text to fit within max_chars per line, returns list of lines"""
+    import textwrap
+    return textwrap.wrap(text, width=max_chars, break_long_words=True, break_on_hyphens=True) or [text]
+
+
+# ============================================
 # Helper: Table Regeneration
 # ============================================
 
@@ -79,6 +89,22 @@ def _regenerate_table_from_manager(chat_manager, table_dat, config):
     """Regenerate table DAT from ChatManager state (used by update callback)"""
     table_dat.clear()
     table_dat.appendRow(['x', 'y', 'text', 'fontsize', 'fontcolorr', 'fontcolorg', 'fontcolorb'])
+
+    wrap_chars = config.get("wrap_chars", 80)
+    line_height = config.get("line_height", 20)
+
+    # Visible window bounds (for clipping)
+    canvas_height = config["canvas_height"]
+    window_top = config.get("chat_window_top", config["chat_y"])
+    window_height = config.get("chat_window_height", 400)
+    window_bottom = window_top + window_height
+
+    # Get scroll offset from chat manager
+    scroll_offset = getattr(chat_manager, 'scroll_offset', 0)
+
+    # Calculate starting Y with scroll offset applied
+    base_y = canvas_height - window_top
+    current_y = base_y + scroll_offset
 
     for msg in chat_manager.get_display_messages():
         if msg.role == "user":
@@ -88,10 +114,22 @@ def _regenerate_table_from_manager(chat_manager, table_dat, config):
         else:
             color = config["assistant_color"]
 
-        table_dat.appendRow([
-            config["chat_x"], msg.y_position, msg.text,
-            config["font_size"], color[0], color[1], color[2]
-        ])
+        # Wrap the message text into multiple lines
+        wrapped_lines = _wrap_text(msg.text, wrap_chars)
+
+        for line in wrapped_lines:
+            # Convert Y to screen space for bounds checking
+            screen_y_from_top = canvas_height - current_y
+
+            # Only add row if within visible window
+            if window_top <= screen_y_from_top <= window_bottom:
+                table_dat.appendRow([
+                    config["chat_x"], current_y, line,
+                    config["font_size"], color[0], color[1], color[2]
+                ])
+
+            current_y -= line_height  # Move down for next line
+
     table_dat.cook(force=True)
 
 
@@ -315,6 +353,11 @@ def _create_keyboard_input(container, spec_dat):
 
     # Callback code
     callback_code = '''# Keyboard callbacks
+import textwrap
+
+def _wrap_text(text, max_chars=60):
+    """Wrap text to fit within max_chars per line, returns list of lines"""
+    return textwrap.wrap(text, width=max_chars, break_long_words=True, break_on_hyphens=True) or [text]
 
 def onKey(dat, key, character, alt, lAlt, rAlt, ctrl, lCtrl, rCtrl, shift, lShift, rShift, state, time):
     """Handle key press events"""
@@ -358,6 +401,26 @@ def onKey(dat, key, character, alt, lAlt, rAlt, ctrl, lCtrl, rCtrl, shift, lShif
                 chat_manager.reset()
                 _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
 
+            elif key == 'pageup':
+                # Scroll up to see older messages
+                chat_manager.scroll_up()
+                _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+
+            elif key == 'pagedown':
+                # Scroll down to see newer messages
+                chat_manager.scroll_down()
+                _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+
+            elif key == 'home':
+                # Scroll to oldest messages (max scroll)
+                chat_manager.scroll_offset = 9999
+                _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+
+            elif key == 'end':
+                # Scroll to newest messages
+                chat_manager.reset_scroll()
+                _regenerate_table(chat_manager, table_dat, CHAT_CONFIG)
+
             elif character and character.isprintable():
                 # Add character
                 chat_manager.append_to_input(character)
@@ -369,11 +432,28 @@ def onKey(dat, key, character, alt, lAlt, rAlt, ctrl, lCtrl, rCtrl, shift, lShif
         traceback.print_exc()
 
 def _regenerate_table(chat_manager, table_dat, config):
-    """Regenerate the entire specification table from ChatManager"""
+    """Regenerate the entire specification table from ChatManager with word wrapping and scroll support"""
     table_dat.clear()
 
     # Header row
     table_dat.appendRow(['x', 'y', 'text', 'fontsize', 'fontcolorr', 'fontcolorg', 'fontcolorb'])
+
+    # Get wrap settings from config
+    wrap_chars = config.get("wrap_chars", 50)
+    line_height = config.get("line_height", 30)
+
+    # Visible window bounds (for clipping)
+    canvas_height = config["canvas_height"]
+    window_top = config.get("chat_window_top", config["chat_y"])
+    window_height = config.get("chat_window_height", 400)
+    window_bottom = window_top + window_height
+
+    # Get scroll offset from chat manager
+    scroll_offset = getattr(chat_manager, 'scroll_offset', 0)
+
+    # Calculate starting Y with scroll offset applied
+    base_y = canvas_height - window_top
+    current_y = base_y + scroll_offset
 
     # Get all display messages
     messages = chat_manager.get_display_messages()
@@ -387,14 +467,24 @@ def _regenerate_table(chat_manager, table_dat, config):
         else:  # assistant
             color = config["assistant_color"]
 
-        # Add row
-        table_dat.appendRow([
-            config["chat_x"],
-            msg.y_position,
-            msg.text,
-            config["font_size"],
-            color[0], color[1], color[2]
-        ])
+        # Wrap text into multiple lines
+        wrapped_lines = _wrap_text(msg.text, wrap_chars)
+
+        for line in wrapped_lines:
+            # Convert Y to screen space for bounds checking
+            screen_y_from_top = canvas_height - current_y
+
+            # Only add row if within visible window
+            if window_top <= screen_y_from_top <= window_bottom:
+                table_dat.appendRow([
+                    config["chat_x"],
+                    current_y,
+                    line,
+                    config["font_size"],
+                    color[0], color[1], color[2]
+                ])
+
+            current_y -= line_height  # Move down for next line
 
     # Force cook to ensure display updates immediately
     table_dat.cook(force=True)

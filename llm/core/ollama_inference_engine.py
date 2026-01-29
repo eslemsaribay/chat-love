@@ -52,6 +52,7 @@ class OllamaInferenceEngine:
             "model": model_name,
             "prompt": prompt,
             "stream": False,
+            "context": [],  # Always start fresh - no cached context from previous requests
             "options": {
                 "num_predict": config.get("max_tokens", 512),
                 "temperature": config.get("temperature", 0.7),
@@ -116,6 +117,7 @@ class OllamaInferenceEngine:
             "model": model_name,
             "prompt": prompt,
             "stream": True,
+            "context": [],  # Always start fresh - no cached context from previous requests
             "options": {
                 "num_predict": config.get("max_tokens", 512),
                 "temperature": config.get("temperature", 0.7),

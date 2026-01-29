@@ -40,6 +40,7 @@ class ChatLLMWorker(threading.Thread):
 
     def run(self):
         """Execute in background thread"""
+        print(f"[LLM WORKER] Starting, streaming={self.streaming_callback is not None and self.config.get('streaming_enabled', True)}")
         try:
             if self.streaming_callback and self.config.get("streaming_enabled", True):
                 # Streaming mode
@@ -48,11 +49,12 @@ class ChatLLMWorker(threading.Thread):
                 # Non-streaming mode
                 self._run_blocking()
         except Exception as e:
-            print(f"LLM Worker Error: {e}")
+            print(f"[LLM WORKER] Error: {e}")
             self.callback(str(e), False)
 
     def _run_streaming(self):
         """Run in streaming mode (incremental text display)"""
+        print(f"[LLM WORKER] Running in streaming mode...")
         accumulated_text = ""
 
         try:
@@ -65,27 +67,34 @@ class ChatLLMWorker(threading.Thread):
                         self.streaming_callback(chunk, accumulated_text)
 
             # Call final callback with full text
+            print(f"[LLM WORKER] Streaming complete, total length: {len(accumulated_text)}")
             self.callback(accumulated_text, True)
 
         except Exception as e:
-            print(f"Streaming error: {e}")
+            print(f"[LLM WORKER] Streaming error: {e}")
             self.callback(str(e), False)
 
     def _run_blocking(self):
         """Run in blocking mode (wait for full response)"""
+        print(f"[LLM WORKER] Running in blocking mode...")
         try:
             # Call LLM (blocks until complete)
             result = self.llm_interface.send_message(self.user_message)
+            print(f"[LLM WORKER] Got result type: {type(result)}")
 
-            # Extract response text - key is "text" not "response"
+            # Extract response text - ChatInterface returns "response" key
             if isinstance(result, dict) and result.get("success") and "data" in result:
-                response_text = result["data"].get("text", "")
+                # Try "response" first (from ChatInterface.send_message), then "text" (from raw inference)
+                response_text = result["data"].get("response", "") or result["data"].get("text", "")
+                print(f"[LLM WORKER] Blocking complete, response length: {len(response_text)}")
                 self.callback(response_text, True)
             elif isinstance(result, dict) and "error" in result:
+                print(f"[LLM WORKER] Error in result: {result['error']}")
                 self.callback(result["error"], False)
             else:
+                print(f"[LLM WORKER] Unexpected result format: {result}")
                 self.callback(str(result), False)
 
         except Exception as e:
-            print(f"LLM error: {e}")
+            print(f"[LLM WORKER] Exception: {e}")
             self.callback(str(e), False)

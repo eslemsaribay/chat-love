@@ -42,6 +42,7 @@ class ChatManager:
         self.llm_worker = None  # Reference to current worker thread
         self.awaiting_username = True  # First message will determine username
         self.on_update_callback = on_update_callback  # Callback for display refresh
+        self.scroll_offset = 0  # Pixels scrolled (positive = scrolled up to see older messages)
 
     def initialize_llm(self):
         """Initialize LLM from existing llm/ package"""
@@ -78,21 +79,22 @@ class ChatManager:
         - Clear LLM conversation context
         - Add initial bot greeting
         """
-        print("Resetting chat...")
+        print("[CHAT RESET] Resetting chat state...")
 
         # Clear local state
         self.messages = []
         self.current_input = ""
         self.config["user_name"] = None
         self.awaiting_username = True
+        self.scroll_offset = 0  # Reset scroll position
 
         # Clear LLM conversation context if available
         if self.llm_interface:
             try:
                 self.llm_interface.clear_conversation()
-                print("  - LLM context cleared")
+                print("[CHAT RESET] LLM context cleared")
             except Exception as e:
-                print(f"  - Warning: Could not clear LLM context: {e}")
+                print(f"[CHAT RESET] Warning: Could not clear LLM context: {e}")
 
         # Add initial bot greeting
         self.add_initial_message()
@@ -100,7 +102,7 @@ class ChatManager:
         # Trigger display refresh
         self._notify_update()
 
-        print("Chat reset complete!")
+        print("[CHAT RESET] Chat reset complete!")
 
     def append_to_input(self, char: str):
         """Add character to current input buffer"""
@@ -115,6 +117,23 @@ class ChatManager:
         """Clear input buffer"""
         self.current_input = ""
 
+    def scroll_up(self, pixels: int = None):
+        """Scroll up to see older messages (increases scroll offset)"""
+        step = pixels or self.config.get("scroll_step", 60)
+        self.scroll_offset += step
+        print(f"[SCROLL] Up by {step}px, offset now: {self.scroll_offset}")
+
+    def scroll_down(self, pixels: int = None):
+        """Scroll down to see newer messages (decreases scroll offset)"""
+        step = pixels or self.config.get("scroll_step", 60)
+        self.scroll_offset = max(0, self.scroll_offset - step)
+        print(f"[SCROLL] Down by {step}px, offset now: {self.scroll_offset}")
+
+    def reset_scroll(self):
+        """Reset scroll to bottom (most recent messages visible)"""
+        self.scroll_offset = 0
+        print("[SCROLL] Reset to 0")
+
     def submit_input(self):
         """
         Submit current input as user message
@@ -126,6 +145,9 @@ class ChatManager:
 
         user_text = self.current_input
         self.clear_input()
+
+        print(f"[CHAT INPUT] User submitted: '{user_text}'")
+        print(f"[CHAT INPUT] awaiting_username={self.awaiting_username}, llm_available={self.llm_interface is not None}")
 
         # Special handling for first message (username extraction)
         if self.awaiting_username:
@@ -150,6 +172,7 @@ class ChatManager:
 
     def add_user_message(self, text: str):
         """Add user message to history"""
+        print(f"[CHAT MSG] Adding user message: '{text}'")
         msg = Message(role="user", text=text)
         self.messages.append(msg)
         self._trim_messages()
@@ -157,6 +180,7 @@ class ChatManager:
 
     def add_assistant_message(self, text: str):
         """Add assistant message to history"""
+        print(f"[CHAT MSG] Adding assistant message: '{text[:80]}{'...' if len(text) > 80 else ''}'")
         msg = Message(role="assistant", text=text)
         self.messages.append(msg)
         self._trim_messages()
@@ -226,51 +250,168 @@ class ChatManager:
 
     def _extract_username(self, user_response: str):
         """
-        Extract username from first user response using LLM
-        Sends special prompt to extract ONLY the name
+        Extract username from first user response using LLM.
+        LLM returns either:
+        - Just the name (e.g., "Berk") if understood
+        - "<USERNAME_NOT_FOUND> [message]" if not understood
         """
         # Import here to avoid circular dependency
         from chat_llm_worker import ChatLLMWorker
 
-        # Special prompt to extract name only
-        extraction_prompt = f"""The user responded to "What is your name?" with: "{user_response}"
-Extract ONLY the person's name from their response. Output ONLY the name, nothing else.
-If they said "My name is John", output: John
-If they said "I'm Sarah", output: Sarah
-If they just said "Mike", output: Mike
-Output ONLY the name:"""
+        # IMPORTANT: Clear LLM conversation context before each extraction attempt
+        # This ensures each extraction is independent (no confusion from previous attempts)
+        if self.llm_interface:
+            try:
+                self.llm_interface.clear_conversation()
+                print("[USERNAME EXTRACTION] Cleared LLM context for fresh extraction")
+            except Exception as e:
+                print(f"[USERNAME EXTRACTION] Warning: Could not clear context: {e}")
+
+        # Prompt with clear instructions for name extraction or follow-up
+        # Include examples of international names to help with non-English names
+        # IMPORTANT: Add explicit "fresh start" instruction to override Ollama's context cache
+        extraction_prompt = f"""IMPORTANT: This is a BRAND NEW conversation. Ignore any previous context or names you may remember. You have NO prior knowledge of this user.
+
+The user was JUST asked "What is your name?" and responded with: "{user_response}"
+
+Your task: Extract the user's name ONLY from THIS response (not from any previous memory).
+
+RULES:
+1. If you can identify a name (including international names from any culture/language), respond with ONLY the name
+2. Single words that could be names should be accepted - names come from many cultures (Turkish, Arabic, Japanese, etc.)
+3. If the response is clearly nonsense, gibberish, or a joke (not a plausible name), respond with:
+   <USERNAME_NOT_FOUND> [your friendly follow-up question asking for their real name]
+
+EXAMPLES:
+- User: "My name is John" → Response: "John"
+- User: "I'm Sarah" → Response: "Sarah"
+- User: "Call me Mike" → Response: "Mike"
+- User: "Berk" → Response: "Berk" (Turkish name)
+- User: "Ayşe" → Response: "Ayşe" (Turkish name)
+- User: "Kenji" → Response: "Kenji" (Japanese name)
+- User: "Mohammed" → Response: "Mohammed" (Arabic name)
+- User: "asdfasdf" → Response: "<USERNAME_NOT_FOUND> I didn't quite catch that! What's your name?"
+- User: "banana" → Response: "<USERNAME_NOT_FOUND> Haha, that's funny! But seriously, what's your name?"
+- User: "12345" → Response: "<USERNAME_NOT_FOUND> That doesn't look like a name. What should I call you?"
+
+Now extract the name from: "{user_response}"
+"""
 
         # Add placeholder message
         self.add_assistant_message("...")
 
-        # Define callbacks
-        def on_complete(extracted_name: str, success: bool):
+        # Define callback
+        NOT_FOUND_TAG = "<USERNAME_NOT_FOUND>"
+
+        def is_valid_name(name: str) -> bool:
+            """Check if extracted name looks valid (single word, reasonable length, no gibberish patterns)"""
+            name = name.strip()
+            # Reject empty
+            if not name:
+                return False
+            # Reject multi-word (names should be single word from extraction)
+            if ' ' in name:
+                return False
+            # Reject too long (names are typically < 20 chars)
+            if len(name) > 20:
+                return False
+            # Reject names with special characters (like <, >, _, etc.)
+            # Names should only contain letters and possibly hyphens/apostrophes
+            allowed_special = {'-', "'"}
+            for char in name:
+                if not char.isalpha() and char not in allowed_special:
+                    return False
+            # Reject if mostly non-alphabetic
+            alpha_count = sum(1 for c in name if c.isalpha())
+            if alpha_count < len(name) * 0.7:
+                return False
+            return True
+
+        def on_complete(extracted_response: str, success: bool):
             """Called when name extraction complete"""
-            if success and extracted_name.strip():
-                # Clean the extracted name (remove any extra text)
-                name = extracted_name.strip().split()[0]  # Take first word if multiple
-                self.config["user_name"] = name
-                self.awaiting_username = False
+            print(f"[USERNAME EXTRACTION] success={success}, response='{extracted_response}'")
+
+            # Handle LLM failure
+            if not success or not extracted_response.strip():
+                print("[USERNAME EXTRACTION] LLM failed, asking again...")
+                # Remove placeholder
+                if self.messages and self.messages[-1].text == "...":
+                    self.messages.pop()
+
+                # Add the user's message
+                self.add_user_message(f"?: {user_response}")
+
+                # Ask again - don't use raw input as username
+                self.add_assistant_message(f"{self.config['bot_name']}: Sorry, I didn't catch that. What's your name?")
+                # Keep awaiting_username = True
+                self._notify_update()
+                return
+
+            response = extracted_response.strip()
+
+            # Check for USERNAME_NOT_FOUND tag
+            if response.startswith(NOT_FOUND_TAG):
+                # Username not understood - extract the follow-up message
+                follow_up_message = response[len(NOT_FOUND_TAG):].strip()
+                print(f"[USERNAME EXTRACTION] NOT_FOUND, follow-up: '{follow_up_message}'")
 
                 # Remove placeholder message
                 if self.messages and self.messages[-1].text == "...":
                     self.messages.pop()
 
-                # Add the first user message with extracted name
-                self.add_user_message(f"{name}: {user_response}")
+                # Add the user's message (without username prefix since we don't know it yet)
+                self.add_user_message(f"?: {user_response}")
 
-                # Add greeting response
-                self.add_assistant_message(f"{self.config['bot_name']}: Nice to meet you, {name}!")
+                # Add bot's follow-up question
+                if follow_up_message:
+                    self.add_assistant_message(f"{self.config['bot_name']}: {follow_up_message}")
+                else:
+                    self.add_assistant_message(f"{self.config['bot_name']}: I didn't quite catch that. What's your name?")
+
+                # Keep awaiting_username = True (don't change it)
             else:
-                # Fallback: use raw input if extraction failed
-                self.config["user_name"] = user_response.strip()
-                self.awaiting_username = False
-                self.add_user_message(f"{self.config['user_name']}: {user_response}")
-                self.add_assistant_message(f"{self.config['bot_name']}: Nice to meet you!")
+                # Validate the extracted name
+                name = response.strip()
+                print(f"[USERNAME EXTRACTION] Extracted name: '{name}', valid={is_valid_name(name)}")
 
-            self._notify_update()  # Trigger display refresh after username extraction
+                if not is_valid_name(name):
+                    # Name looks invalid, ask again
+                    print(f"[USERNAME EXTRACTION] Invalid name, asking again...")
+                    if self.messages and self.messages[-1].text == "...":
+                        self.messages.pop()
+
+                    self.add_user_message(f"?: {user_response}")
+                    self.add_assistant_message(f"{self.config['bot_name']}: Hmm, I'm not sure I got your name. Could you tell me again?")
+                    # Keep awaiting_username = True
+                else:
+                    # Username extracted successfully
+                    self.config["user_name"] = name
+                    self.awaiting_username = False
+                    print(f"[USERNAME EXTRACTION] SUCCESS! Username set to: '{name}'")
+
+                    # IMPORTANT: Clear LLM context after successful extraction
+                    # This removes the extraction prompt so normal chat starts fresh
+                    if self.llm_interface:
+                        try:
+                            self.llm_interface.clear_conversation()
+                            print("[USERNAME EXTRACTION] Cleared LLM context for fresh chat start")
+                        except Exception as e:
+                            print(f"[USERNAME EXTRACTION] Warning: Could not clear context: {e}")
+
+                    # Remove placeholder message
+                    if self.messages and self.messages[-1].text == "...":
+                        self.messages.pop()
+
+                    # Add the user's message with extracted name
+                    self.add_user_message(f"{name}: {user_response}")
+
+                    # Add greeting response
+                    self.add_assistant_message(f"{self.config['bot_name']}: Nice to meet you, {name}!")
+
+            self._notify_update()  # Trigger display refresh
 
         # Spawn worker thread (no streaming for name extraction)
+        print(f"[USERNAME EXTRACTION] Spawning LLM worker for name extraction...")
         worker = ChatLLMWorker(
             llm_interface=self.llm_interface,
             user_message=extraction_prompt,
@@ -280,6 +421,7 @@ Output ONLY the name:"""
         )
         worker.start()
         self.llm_worker = worker
+        print(f"[USERNAME EXTRACTION] Worker started")
 
     def _spawn_llm_worker(self, user_message: str):
         """
@@ -291,17 +433,21 @@ Output ONLY the name:"""
 
         bot_name = self.config["bot_name"]
 
+        print(f"[LLM REQUEST] Sending to LLM: '{user_message}'")
+
         # Create placeholder message for streaming
         self.add_assistant_message(f"{bot_name}: ...")
 
         # Define callbacks
         def on_chunk(chunk_text: str, full_text: str):
             """Called when streaming chunk arrives"""
+            print(f"[LLM STREAM] Chunk received, total length: {len(full_text)}")
             self.update_last_assistant_message(f"{bot_name}: {full_text}")
             self._notify_update()  # Trigger display refresh
 
         def on_complete(final_text: str, success: bool):
             """Called when response complete"""
+            print(f"[LLM RESPONSE] success={success}, response='{final_text[:100]}{'...' if len(final_text) > 100 else ''}'")
             if success:
                 self.update_last_assistant_message(f"{bot_name}: {final_text}")
             else:
