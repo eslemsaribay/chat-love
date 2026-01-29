@@ -36,7 +36,7 @@ CHAT_CONFIG = {
     # Identity
     "bot_name": "lovebot",                      # AI assistant name
     "user_name": None,                          # User name (determined dynamically)
-    "initial_message": "Hello! What is your name?",  # First message from bot
+    "initial_message": "Hi! What is your name?",  # First message from bot
 
     # LLM Settings
     "ollama_model": "llama3.2",
