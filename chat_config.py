@@ -39,7 +39,7 @@ CHAT_CONFIG = {
     "initial_message": "Hi! What is your name?",  # First message from bot
 
     # LLM Settings
-    "ollama_model": "llama3.2",
+    "ollama_model": "llama3.1",
     "streaming_enabled": True,
     "max_tokens": 512,  
     "temperature": 0.65,  # Slightly more deterministic
