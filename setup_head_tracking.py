@@ -1,10 +1,10 @@
 # ============================================================================
-# FACE TRACKING FINAL - MediaPipe to Luna FBX
+# FACE TRACKING - MediaPipe to Luna FBX
 # ============================================================================
-# Single script to set up face point tracking for Luna model
+# Sets up head pose tracking and eyebrow movement for Luna model
 #
 # USAGE:
-#   exec(open(project.folder + '/face_tracking_final.py').read())
+#   exec(open(project.folder + '/setup_head_tracking.py').read())
 #
 # AFTER SETUP:
 #   - Look straight at camera to calibrate neutral position
@@ -19,11 +19,13 @@
 # ============================================================================
 
 MEDIAPIPE_CHOP = '/project1/face_points'           # MediaPipe face points output
+BLENDSHAPES_CHOP = '/project1/blend_shapes'        # MediaPipe blendshapes output
 HEAD_BONE_PATH = '/project1/luna_container/Luna/mixamorig_Head'  # Head bone
+EYEBROW_PATH = '/project1/luna_container/Luna/Zenna_eyebrow006'  # Eyebrow geometry
 CONTAINER_PATH = '/project1'                        # Where to create operators
 
 # ============================================================================
-# TUNING PARAMETERS
+# TUNING PARAMETERS - HEAD
 # ============================================================================
 
 PITCH_MULT = 200.0    # Up/down sensitivity
@@ -32,11 +34,16 @@ ROLL_MULT = 5.0       # Tilt sensitivity
 SMOOTH = 0.85         # Smoothing (0-1, higher = smoother)
 
 # Offset adjustment for neutral pose alignment
-# Positive PITCH_OFFSET = model looks more UP at neutral
-# Positive YAW_OFFSET = model looks more RIGHT at neutral
 PITCH_OFFSET = 5.0
-YAW_OFFSET = 3.0
+YAW_OFFSET = 3.0 
 ROLL_OFFSET = 0.0
+
+# ============================================================================
+# TUNING PARAMETERS - EYEBROWS
+# ============================================================================
+
+EYEBROW_SCALE = 0.01    # How much eyebrows move (in scene units)
+EYEBROW_SMOOTH = 0.6    # Smoothing for eyebrow movement (lower = more responsive)
 
 # ============================================================================
 # SETUP SCRIPT
@@ -68,6 +75,22 @@ def setup_face_tracking():
         return False
     print(f"[OK] Head bone: {hb.path}")
 
+    # Verify eyebrow geometry exists
+    eyebrow = op(EYEBROW_PATH)
+    if eyebrow is None:
+        print(f"WARNING: Eyebrow geometry not found at {EYEBROW_PATH}")
+        print(f"         Eyebrow tracking will be skipped")
+    else:
+        print(f"[OK] Eyebrow geometry: {eyebrow.path}")
+
+    # Verify blendshapes CHOP exists (needed for eyebrows)
+    blend = op(BLENDSHAPES_CHOP)
+    if blend is None:
+        print(f"WARNING: Blendshapes CHOP not found at {BLENDSHAPES_CHOP}")
+        print(f"         Eyebrow tracking will be skipped")
+    else:
+        print(f"[OK] Blendshapes CHOP: {blend.path} ({blend.numChans} channels)")
+
     # -------------------------------------------------------------------------
     # Create Constant CHOP for head pose values
     # -------------------------------------------------------------------------
@@ -85,6 +108,8 @@ def setup_face_tracking():
     head_pose.par.value1 = 0
     head_pose.par.name2 = 'mixamorig_Head:rz'
     head_pose.par.value2 = 0
+    head_pose.par.name3 = 'eyebrow_ty'
+    head_pose.par.value3 = 0
     head_pose.nodeX = 0
     head_pose.nodeY = -300
     print(f"    Created: {head_pose.path}")
@@ -106,10 +131,11 @@ def setup_face_tracking():
     tracking_code = f'''import math
 
 # ============================================================================
-# FACE TRACKING - Execute DAT
+# FACE TRACKING - Execute DAT (Head + Eyebrows)
 # ============================================================================
 
 MEDIAPIPE = '{MEDIAPIPE_CHOP}'
+BLENDSHAPES = '{BLENDSHAPES_CHOP}'
 HEAD_POSE = '{CONTAINER_PATH}/luna_head_pose'
 
 # Landmarks (MediaPipe face mesh indices)
@@ -121,7 +147,7 @@ RIGHT_EYE = 263
 LEFT_CHEEK = 234
 RIGHT_CHEEK = 454
 
-# Tuning (edit these to adjust behavior)
+# Head tuning
 PITCH_MULT = {PITCH_MULT}
 YAW_MULT = {YAW_MULT}
 ROLL_MULT = {ROLL_MULT}
@@ -132,14 +158,21 @@ PITCH_OFFSET = {PITCH_OFFSET}
 YAW_OFFSET = {YAW_OFFSET}
 ROLL_OFFSET = {ROLL_OFFSET}
 
+# Eyebrow tuning
+EYEBROW_SCALE = {EYEBROW_SCALE}
+EYEBROW_SMOOTH = {EYEBROW_SMOOTH}
+
 def getState():
     hp = op(HEAD_POSE)
     if hp is None:
         return None
     s = hp.storage.get('hpstate', None)
     if s is None:
-        s = {{'prev': [0,0,0], 'neutral': None}}
+        s = {{'prev': [0,0,0], 'neutral': None, 'prev_eyebrow': 0.0}}
         hp.storage['hpstate'] = s
+    # Ensure prev_eyebrow exists (for upgrades)
+    if 'prev_eyebrow' not in s:
+        s['prev_eyebrow'] = 0.0
     return s
 
 def angle_difference(a, b):
@@ -219,10 +252,44 @@ def onFrameStart(frame):
     roll = p[2] * SMOOTH + roll * (1 - SMOOTH)
     state['prev'] = [pitch, yaw, roll]
 
-    # Output to Constant CHOP
+    # Output head pose to Constant CHOP
     hp.par.value0 = pitch
     hp.par.value1 = yaw
     hp.par.value2 = roll
+
+    # -------------------------------------------------------------------------
+    # EYEBROW TRACKING
+    # -------------------------------------------------------------------------
+    blend = op(BLENDSHAPES)
+    if blend is not None:
+        # Read eyebrow blendshapes (safe get)
+        def get_blend(name):
+            try:
+                c = blend[name]
+                return c.eval() if c else 0.0
+            except:
+                return 0.0
+
+        # MediaPipe eyebrow blendshapes
+        brow_inner_up = get_blend('browInnerUp')
+        brow_down_l = get_blend('browDownLeft')
+        brow_down_r = get_blend('browDownRight')
+        brow_outer_up_l = get_blend('browOuterUpLeft')
+        brow_outer_up_r = get_blend('browOuterUpRight')
+
+        # Combine: up values raise, down values lower
+        brow_up = brow_inner_up + (brow_outer_up_l + brow_outer_up_r) / 2
+        brow_down = (brow_down_l + brow_down_r) / 2
+
+        # Net eyebrow movement
+        eyebrow_raw = (brow_up - brow_down) * EYEBROW_SCALE
+
+        # Smooth
+        eyebrow_val = state['prev_eyebrow'] * EYEBROW_SMOOTH + eyebrow_raw * (1 - EYEBROW_SMOOTH)
+        state['prev_eyebrow'] = eyebrow_val
+
+        # Output
+        hp.par.value3 = eyebrow_val
 
 # Required callback stubs
 def onFrameEnd(frame):
@@ -277,6 +344,63 @@ def onStart():
     print(f"    rz -> head_pose[mixamorig_Head:rz]")
 
     # -------------------------------------------------------------------------
+    # Connect eyebrow to blendshape tracking via Transform POP
+    # -------------------------------------------------------------------------
+    print("\n[4] Setting up eyebrow vertical tracking...")
+
+    eyebrow = op(EYEBROW_PATH)
+    HEAD_POSE_PATH = CONTAINER_PATH + '/luna_head_pose'
+
+    if eyebrow is None:
+        print(f"    Eyebrow not found at {EYEBROW_PATH} - skipped")
+    else:
+        # First, clean up any old expressions from COMP transform
+        for p in ['tx', 'ty', 'tz', 'rx', 'ry', 'rz', 'px', 'py', 'pz']:
+            par = getattr(eyebrow.par, p, None)
+            if par and par.mode == ParMode.EXPRESSION:
+                par.mode = ParMode.CONSTANT
+                par.val = 0
+                print(f"    Cleaned old expression from COMP {p}")
+
+        # Find the deform POP (skindeformPOP) inside the eyebrow COMP
+        deform_pop = eyebrow.op('deform')
+        if deform_pop is None:
+            print(f"    ERROR: No 'deform' POP found inside eyebrow COMP")
+        else:
+            print(f"    Found deform POP: {deform_pop.path}")
+
+            # Check if we already have a transform POP
+            transform_pop = eyebrow.op('eyebrow_offset')
+            if transform_pop is None:
+                # Create Transform POP after the deform
+                transform_pop = eyebrow.create(transformPOP, 'eyebrow_offset')
+                print(f"    Created: {transform_pop.path}")
+            else:
+                print(f"    Using existing: {transform_pop.path}")
+
+            # Connect: deform -> transform
+            transform_pop.inputConnectors[0].connect(deform_pop)
+
+            # Position in network
+            transform_pop.nodeX = deform_pop.nodeX + 150
+            transform_pop.nodeY = deform_pop.nodeY
+
+            # Link transform POP's ty to eyebrow tracking
+            transform_pop.par.ty.mode = ParMode.EXPRESSION
+            transform_pop.par.ty.expr = f"op('{HEAD_POSE_PATH}')['eyebrow_ty']"
+            print(f"    Transform POP ty -> luna_head_pose['eyebrow_ty']")
+
+            # Set this POP as the display/render node for the geometryCOMP
+            # POPs use the .display property (not par.display)
+            # First, turn OFF the deform POP's display/render
+            deform_pop.display = False
+            deform_pop.render = False
+            # Then set our transform POP as the output
+            transform_pop.display = True
+            transform_pop.render = True
+            print(f"    Set transform POP as sole render output")
+
+    # -------------------------------------------------------------------------
     # Done
     # -------------------------------------------------------------------------
     print("\n" + "=" * 70)
@@ -284,8 +408,12 @@ def onStart():
     print("=" * 70)
     print("""
 Operators created:
-  - luna_head_pose: Constant CHOP holding rotation values
+  - luna_head_pose: Constant CHOP holding head rotation + eyebrow values
   - luna_face_exec: Execute DAT updating values each frame
+
+Tracking:
+  - Head pose: pitch (rx), yaw (ry), roll (rz)
+  - Eyebrows: raise/lower (ty)
 
 Look straight at the camera to capture neutral position.
 
@@ -293,9 +421,9 @@ Helper commands:
   recalibrate()      - Reset neutral position (look at camera first)
   disable_tracking() - Stop tracking
   enable_tracking()  - Resume tracking
-  reset_tracking()   - Full reset (removes expressions from bone)
+  reset_tracking()   - Full reset (removes expressions from bone/eyebrow)
 
-To adjust sensitivity/offsets, edit the face_tracking DAT directly.
+To adjust sensitivity, edit the DAT directly or change values at top of this script.
 """)
     return True
 
@@ -335,8 +463,8 @@ def enable_tracking():
 
 
 def reset_tracking():
-    """Full reset - removes expressions from bone, resets values."""
-    # Reset bone
+    """Full reset - removes expressions from bone and eyebrow, resets values."""
+    # Reset head bone
     hb = op(HEAD_BONE_PATH)
     if hb:
         hb.par.rx.mode = ParMode.CONSTANT
@@ -347,12 +475,20 @@ def reset_tracking():
         hb.par.rz.val = 0
         print("Head bone reset to default")
 
+    # Reset eyebrow ty
+    eyebrow = op(EYEBROW_PATH)
+    if eyebrow:
+        eyebrow.par.ty.mode = ParMode.CONSTANT
+        eyebrow.par.ty.val = 0
+        print("Eyebrow ty reset to default")
+
     # Reset CHOP values
     hp = op(CONTAINER_PATH + '/luna_head_pose')
     if hp:
         hp.par.value0 = 0
         hp.par.value1 = 0
         hp.par.value2 = 0
+        hp.par.value3 = 0
         if 'hpstate' in hp.storage:
             del hp.storage['hpstate']
         print("luna_head_pose values and state cleared")
