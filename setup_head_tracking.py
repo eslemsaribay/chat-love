@@ -50,7 +50,7 @@ EYEBROW_SMOOTH = 0.6    # Smoothing for eyebrow movement (lower = more responsiv
 # TUNING PARAMETERS - EYELIDS
 # ============================================================================
 
-EYELID_DROP = 0.15        # How far eyelashes move DOWN when fully closed (in model units)
+EYELID_DROP = 0.01      # How far eyelashes move DOWN when fully closed (in model units)
 EYELID_POWER = 3.0         # Power curve: higher = effect kicks in more at full close
 EYELID_SMOOTH = 0.3        # Smoothing for eyelid movement
 
