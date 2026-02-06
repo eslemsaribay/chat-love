@@ -22,6 +22,7 @@ MEDIAPIPE_CHOP = '/project1/face_points'           # MediaPipe face points outpu
 BLENDSHAPES_CHOP = '/project1/blend_shapes'        # MediaPipe blendshapes output
 HEAD_BONE_PATH = '/project1/luna_container/Luna/mixamorig_Head'  # Head bone
 EYEBROW_PATH = '/project1/luna_container/Luna/Zenna_eyebrow006'  # Eyebrow geometry
+EYELASH_PATH = '/project1/luna_container/Luna/Zenna_eyelashes02' # Eyelash geometry
 CONTAINER_PATH = '/project1'                        # Where to create operators
 
 # ============================================================================
@@ -44,6 +45,14 @@ ROLL_OFFSET = 0.0
 
 EYEBROW_SCALE = 0.01    # How much eyebrows move (in scene units)
 EYEBROW_SMOOTH = 0.6    # Smoothing for eyebrow movement (lower = more responsive)
+
+# ============================================================================
+# TUNING PARAMETERS - EYELIDS
+# ============================================================================
+
+EYELID_DROP = 0.15        # How far eyelashes move DOWN when fully closed (in model units)
+EYELID_POWER = 3.0         # Power curve: higher = effect kicks in more at full close
+EYELID_SMOOTH = 0.3        # Smoothing for eyelid movement
 
 # ============================================================================
 # SETUP SCRIPT
@@ -110,6 +119,8 @@ def setup_face_tracking():
     head_pose.par.value2 = 0
     head_pose.par.name3 = 'eyebrow_ty'
     head_pose.par.value3 = 0
+    head_pose.par.name4 = 'eyelid_ty'
+    head_pose.par.value4 = 0.0  # Translate Y for eyelash (0 = open, negative = closed/down)
     head_pose.nodeX = 0
     head_pose.nodeY = -300
     print(f"    Created: {head_pose.path}")
@@ -162,17 +173,24 @@ ROLL_OFFSET = {ROLL_OFFSET}
 EYEBROW_SCALE = {EYEBROW_SCALE}
 EYEBROW_SMOOTH = {EYEBROW_SMOOTH}
 
+# Eyelid tuning
+EYELID_DROP = {EYELID_DROP}
+EYELID_POWER = {EYELID_POWER}
+EYELID_SMOOTH = {EYELID_SMOOTH}
+
 def getState():
     hp = op(HEAD_POSE)
     if hp is None:
         return None
     s = hp.storage.get('hpstate', None)
     if s is None:
-        s = {{'prev': [0,0,0], 'neutral': None, 'prev_eyebrow': 0.0}}
+        s = {{'prev': [0,0,0], 'neutral': None, 'prev_eyebrow': 0.0, 'prev_eyelid': 0.0}}
         hp.storage['hpstate'] = s
-    # Ensure prev_eyebrow exists (for upgrades)
+    # Ensure prev_eyebrow/eyelid exists (for upgrades)
     if 'prev_eyebrow' not in s:
         s['prev_eyebrow'] = 0.0
+    if 'prev_eyelid' not in s:
+        s['prev_eyelid'] = 0.0
     return s
 
 def angle_difference(a, b):
@@ -288,8 +306,31 @@ def onFrameStart(frame):
         eyebrow_val = state['prev_eyebrow'] * EYEBROW_SMOOTH + eyebrow_raw * (1 - EYEBROW_SMOOTH)
         state['prev_eyebrow'] = eyebrow_val
 
-        # Output
+        # Output eyebrow
         hp.par.value3 = eyebrow_val
+
+        # -------------------------------------------------------------------------
+        # EYELID TRACKING
+        # -------------------------------------------------------------------------
+        # Read eye blink blendshapes
+        blink_left = get_blend('eyeBlinkLeft')
+        blink_right = get_blend('eyeBlinkRight')
+
+        # Average the blink values
+        blink_avg = (blink_left + blink_right) / 2
+
+        # Calculate ty offset: 0 when open, -EYELID_DROP when fully closed
+        # Negative ty moves the eyelashes DOWN (closing motion)
+        # Power curve makes effect kick in more at full close
+        blink_curved = blink_avg ** EYELID_POWER
+        eyelid_raw = -blink_curved * EYELID_DROP
+
+        # Smooth
+        eyelid_val = state['prev_eyelid'] * EYELID_SMOOTH + eyelid_raw * (1 - EYELID_SMOOTH)
+        state['prev_eyelid'] = eyelid_val
+
+        # Output eyelid scale
+        hp.par.value4 = eyelid_val
 
 # Required callback stubs
 def onFrameEnd(frame):
@@ -401,6 +442,60 @@ def onStart():
             print(f"    Set transform POP as sole render output")
 
     # -------------------------------------------------------------------------
+    # Connect eyelash to blink tracking via Transform POP (scale Y)
+    # -------------------------------------------------------------------------
+    print("\n[5] Setting up eyelid close tracking...")
+
+    eyelash = op(EYELASH_PATH)
+
+    if eyelash is None:
+        print(f"    Eyelash not found at {EYELASH_PATH} - skipped")
+    else:
+        # Find the deform POP inside the eyelash COMP
+        eyelash_deform = eyelash.op('deform')
+        if eyelash_deform is None:
+            print(f"    ERROR: No 'deform' POP found inside eyelash COMP")
+        else:
+            print(f"    Found deform POP: {eyelash_deform.path}")
+
+            # Check if we already have a transform POP
+            eyelid_pop = eyelash.op('eyelid_close')
+            if eyelid_pop is None:
+                # Create Transform POP after the deform
+                eyelid_pop = eyelash.create(transformPOP, 'eyelid_close')
+                print(f"    Created: {eyelid_pop.path}")
+            else:
+                print(f"    Using existing: {eyelid_pop.path}")
+
+            # Connect: deform -> eyelid_close
+            eyelid_pop.inputConnectors[0].connect(eyelash_deform)
+
+            # Position in network
+            eyelid_pop.nodeX = eyelash_deform.nodeX + 150
+            eyelid_pop.nodeY = eyelash_deform.nodeY
+
+            # Clear any old settings from previous scale-based approach
+            for p in ['sx', 'sy', 'sz', 'px', 'py', 'pz']:
+                par = getattr(eyelid_pop.par, p, None)
+                if par:
+                    par.mode = ParMode.CONSTANT
+                    par.val = 1.0 if p.startswith('s') else 0.0
+
+            # Link transform POP's ty (translate Y) to eyelid tracking
+            # Negative ty moves eyelashes DOWN when closing
+            eyelid_pop.par.ty.mode = ParMode.EXPRESSION
+            eyelid_pop.par.ty.expr = f"op('{HEAD_POSE_PATH}')['eyelid_ty']"
+            print(f"    Transform POP ty -> luna_head_pose['eyelid_ty']")
+
+            # Turn OFF the deform POP's display/render
+            eyelash_deform.display = False
+            eyelash_deform.render = False
+            # Set our transform POP as the output
+            eyelid_pop.display = True
+            eyelid_pop.render = True
+            print(f"    Set transform POP as sole render output")
+
+    # -------------------------------------------------------------------------
     # Done
     # -------------------------------------------------------------------------
     print("\n" + "=" * 70)
@@ -408,12 +503,15 @@ def onStart():
     print("=" * 70)
     print("""
 Operators created:
-  - luna_head_pose: Constant CHOP holding head rotation + eyebrow values
+  - luna_head_pose: Constant CHOP holding head rotation + face values
   - luna_face_exec: Execute DAT updating values each frame
+  - eyebrow_offset: Transform POP in eyebrow COMP
+  - eyelid_close: Transform POP in eyelash COMP
 
 Tracking:
   - Head pose: pitch (rx), yaw (ry), roll (rz)
-  - Eyebrows: raise/lower (ty)
+  - Eyebrows: raise/lower (ty offset)
+  - Eyelids: blink (sy scale)
 
 Look straight at the camera to capture neutral position.
 
