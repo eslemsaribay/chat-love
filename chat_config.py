@@ -26,17 +26,17 @@ CHAT_CONFIG = {
     "scroll_step": 60,          # Pixels to scroll per Page Up/Down (3 lines × 20px)
 
     # Colors (RGB 0-1)
-    "user_color": (0.0, 0.7, 0.0),       # Cyan for user messages
-    "assistant_color": (0.0, 0.0, 0.7),  # White for assistant messages
-    "input_color": (0.5, 0.0, 0.0),      # Gray for current input
+    "user_color": (0.0, 0.0, 0.0),       # Black for user messages
+    "assistant_color": (1.0, 0.0, 0.7),  # Pink for assistant messages
+    "input_color": (0.0, 0.0, 0.0),      # Gray for current input
 
     # Behavior
     "input_prefix": "> ",       # Prefix for input line
 
     # Identity
-    "bot_name": "lovebot",                      # AI assistant name
+    "bot_name": "luna",                      # AI assistant name
     "user_name": None,                          # User name (determined dynamically)
-    "initial_message": "Hi! What is your name?",  # First message from bot
+    "initial_message": "Hi! I'm Luna, who are you?",  # First message from bot
 
     # LLM Settings
     "ollama_model": "llama3.1",
