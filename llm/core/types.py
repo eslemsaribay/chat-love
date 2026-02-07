@@ -73,7 +73,7 @@ class IInferenceEngine(Protocol):
     """Protocol for inference execution."""
 
     def generate(self, prompt: str, config: InferenceConfig) -> Result:
-        """Generate a response (non-streaming)."""
+        """Generate a response (non-streaming, /api/generate)."""
         ...
 
     def generate_stream(
@@ -81,7 +81,19 @@ class IInferenceEngine(Protocol):
         prompt: str,
         config: InferenceConfig
     ) -> Iterator[str]:
-        """Generate a response (streaming)."""
+        """Generate a response (streaming, /api/generate)."""
+        ...
+
+    def chat(self, messages: list[dict], config: InferenceConfig) -> Result:
+        """Chat with structured messages (non-streaming, /api/chat)."""
+        ...
+
+    def chat_stream(
+        self,
+        messages: list[dict],
+        config: InferenceConfig
+    ) -> Iterator[str]:
+        """Chat with structured messages (streaming, /api/chat)."""
         ...
 
 
@@ -101,5 +113,9 @@ class IConversationManager(Protocol):
         ...
 
     def get_context_for_inference(self, system_prompt: str) -> str:
-        """Build context string for inference."""
+        """Build context string for inference (/api/generate)."""
+        ...
+
+    def get_messages_for_chat(self, system_prompt: str) -> list[dict]:
+        """Build structured messages for /api/chat."""
         ...

@@ -44,10 +44,13 @@ class PromptBuilder:
         # Add system instruction
         instruction = get_system_instruction(self._instruction_template)
         components.append(instruction)
+        print(f"[PROMPT BUILD] System instruction loaded: template='{self._instruction_template}', length={len(instruction)} chars")
+        print(f"[PROMPT BUILD] System instruction preview: {instruction[:120]}...")
 
         # Add custom context if provided
         if custom_context:
             components.append(custom_context)
+            print(f"[PROMPT BUILD] Custom context added: {len(custom_context)} chars")
 
         # Add few-shot examples
         if self._include_examples:
@@ -55,8 +58,15 @@ class PromptBuilder:
             if examples:
                 components.append("\n# Examples:\n")
                 components.append(examples)
+                print(f"[PROMPT BUILD] Few-shot examples loaded: {len(examples)} chars, {examples.count('EXAMPLES:') } example stages found")
+            else:
+                print(f"[PROMPT BUILD] WARNING: Few-shot examples enabled but returned empty!")
+        else:
+            print(f"[PROMPT BUILD] Few-shot examples: DISABLED (include_examples=False)")
 
-        return "\n\n".join(components)
+        result = "\n\n".join(components)
+        print(f"[PROMPT BUILD] Total system prompt: {len(result)} chars")
+        return result
 
     def set_template(self, template_name: str) -> None:
         """Change the instruction template.

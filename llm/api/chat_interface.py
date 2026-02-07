@@ -68,6 +68,9 @@ class ChatInterface:
     ) -> Result:
         """Send a user message and get a response.
 
+        Uses /api/chat with structured messages to keep system instructions
+        separate from conversation history (prevents character breaks).
+
         Args:
             user_message: The user's input message
             config: Optional inference configuration
@@ -78,13 +81,15 @@ class ChatInterface:
         # Add user message to history
         self._conversation_manager.add_message("user", user_message)
 
-        # Build prompt with context
+        # Build structured messages for chat API
+        print(f"[CHAT INTERFACE] Building messages for /api/chat (non-streaming)...")
         system_prompt = self._prompt_builder.build_system_prompt()
-        full_prompt = self._conversation_manager.get_context_for_inference(system_prompt)
+        messages = self._conversation_manager.get_messages_for_chat(system_prompt)
+        print(f"[CHAT INTERFACE] Chat messages: {len(messages)} messages, {self._conversation_manager.get_message_count()} in history")
 
-        # Generate response
+        # Generate response via chat API
         inference_config = config or {}
-        result = self._inference_engine.generate(full_prompt, inference_config)
+        result = self._inference_engine.chat(messages, inference_config)
 
         if result["success"]:
             assistant_response = result["data"]["text"].strip()
@@ -107,6 +112,9 @@ class ChatInterface:
     ) -> Iterator[str]:
         """Send a user message and get a streaming response.
 
+        Uses /api/chat with structured messages to keep system instructions
+        separate from conversation history (prevents character breaks).
+
         Args:
             user_message: The user's input message
             config: Optional inference configuration
@@ -117,15 +125,17 @@ class ChatInterface:
         # Add user message to history
         self._conversation_manager.add_message("user", user_message)
 
-        # Build prompt with context
+        # Build structured messages for chat API
+        print(f"[CHAT INTERFACE] Building messages for /api/chat (streaming)...")
         system_prompt = self._prompt_builder.build_system_prompt()
-        full_prompt = self._conversation_manager.get_context_for_inference(system_prompt)
+        messages = self._conversation_manager.get_messages_for_chat(system_prompt)
+        print(f"[CHAT INTERFACE] Chat messages: {len(messages)} messages, {self._conversation_manager.get_message_count()} in history")
 
-        # Generate streaming response
+        # Generate streaming response via chat API
         inference_config = config or {}
         full_response = []
 
-        for chunk in self._inference_engine.generate_stream(full_prompt, inference_config):
+        for chunk in self._inference_engine.chat_stream(messages, inference_config):
             full_response.append(chunk)
             yield chunk
 

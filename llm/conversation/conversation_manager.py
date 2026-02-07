@@ -81,6 +81,41 @@ class ConversationManager:
 
         return "\n\n".join(formatted_messages)
 
+    def get_messages_for_chat(self, system_prompt: str = "") -> list[dict]:
+        """Build structured messages array for /api/chat endpoint.
+
+        Returns a list of role/content dicts with truncation applied.
+        System prompt is kept as a separate system message, ensuring
+        the model treats it as hidden context rather than conversation text.
+
+        Args:
+            system_prompt: System prompt (instructions + examples)
+
+        Returns:
+            List of {"role": ..., "content": ...} dicts
+        """
+        messages = []
+
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+
+        # Convert conversation history to text for truncation
+        message_texts = []
+        for msg in self._messages:
+            message_texts.append(f"{msg['role'].capitalize()}: {msg['content']}")
+
+        # Truncate if necessary (keeps most recent)
+        truncated = self._context_manager.truncate_messages(message_texts)
+
+        # Convert truncated text back to structured messages
+        for text in truncated:
+            if text.startswith("User: "):
+                messages.append({"role": "user", "content": text[len("User: "):]})
+            elif text.startswith("Assistant: "):
+                messages.append({"role": "assistant", "content": text[len("Assistant: "):]})
+
+        return messages
+
     def get_message_count(self) -> int:
         """Get the total number of messages.
 
