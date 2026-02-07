@@ -19,8 +19,8 @@ MediaPipe head rotation mapped to model. Call `recalibrate()` while looking at c
 exec(open(project.folder + '/setup_head_tracking.py').read())
 ```
 
-## Mouth Deformation
-Blendshape-driven lip sync on Zenna_body mesh.
+## Auto-Scale
+Scales Luna model based on detected face size (proxy for distance).
 ```python
-exec(open(project.folder + '/setup_mouth.py').read())
+exec(open(project.folder + '/setup_auto_scale.py').read())
 ```
