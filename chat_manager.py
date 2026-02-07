@@ -96,6 +96,14 @@ class ChatManager:
 
         print("[CHAT RESET] Resetting chat state...")
 
+        # Reset debug session so next conversation gets a new file
+        try:
+            from llm.core.ollama_inference_engine import _reset_debug_session
+            _reset_debug_session()
+            print("[CHAT RESET] Debug session reset")
+        except Exception:
+            pass  # Module may not be loaded yet on first run
+
         # Reload chat config module
         if 'chat_config' in sys.modules:
             try:
@@ -128,14 +136,27 @@ class ChatManager:
 
                 # Now reload the llm package to pick up any code changes
                 if 'llm' in sys.modules:
-                    # Reload prompt modules
-                    for mod in ['llm.prompts.system_instructions', 'llm.prompts.examples']:
+                    # Reload ALL llm submodules that may have changed
+                    reload_modules = [
+                        'llm.prompts.system_instructions',
+                        'llm.prompts.examples',
+                        'llm.utils.result',
+                        'llm.utils.error_handling',
+                        'llm.utils.logging',
+                        'llm.core.types',
+                        'llm.core.context_manager',
+                        'llm.core.ollama_model_manager',
+                        'llm.core.ollama_inference_engine',
+                        'llm.conversation.conversation_manager',
+                        'llm.conversation.prompt_builder',
+                        'llm.conversation.persistence',
+                        'llm.api.chat_interface',
+                        'llm.main',
+                    ]
+                    for mod in reload_modules:
                         if mod in sys.modules:
                             importlib.reload(sys.modules[mod])
                             print(f"[CHAT RESET] Reloaded: {mod}")
-                    # Reload llm.main (where initialize_llm is defined)
-                    if 'llm.main' in sys.modules:
-                        importlib.reload(sys.modules['llm.main'])
                     # Reload the package __init__ to update exports
                     importlib.reload(sys.modules['llm'])
 
@@ -144,6 +165,17 @@ class ChatManager:
                 initialize_llm(model_path=self.config["ollama_model"])
                 self.llm_interface = get_chat_interface()
                 print("[CHAT RESET] LLM fully reset with fresh prompts")
+
+                # Verify loaded prompts after reset
+                try:
+                    from llm.prompts.system_instructions import get_system_instruction
+                    from llm.prompts.examples import get_few_shot_examples
+                    si = get_system_instruction()
+                    ex = get_few_shot_examples()
+                    print(f"[CHAT RESET] Verified system_instructions: {len(si)} chars, starts with: '{si[:80]}...'")
+                    print(f"[CHAT RESET] Verified examples: {len(ex)} chars, {ex.count('EXAMPLES:') if ex else 0} stages")
+                except Exception as ve:
+                    print(f"[CHAT RESET] WARNING: Could not verify prompts after reset: {ve}")
             except Exception as e:
                 print(f"[CHAT RESET] Warning: Could not reset LLM: {e}")
                 import traceback
@@ -476,9 +508,14 @@ Now extract the name from: "{user_response}"
                             initial_msg = self.config.get('initial_message', f"Hi, I'm {bot_name}! What's your name?")
 
                             # Add to LLM conversation (not display - that's handled separately)
-                            self.llm_interface._conversation_manager.add_message("assistant", f"{bot_name}: {initial_msg}")
-                            self.llm_interface._conversation_manager.add_message("user", f"{name}: {user_response}")
-                            print(f"[USERNAME EXTRACTION] Re-seeded LLM context with intro (2 messages)")
+                            # NOTE: Don't include name prefixes here - /api/chat uses
+                            # role fields for speaker identity. Adding "Luna:" to assistant
+                            # content teaches the model to prefix all its responses with "Luna:".
+                            self.llm_interface._conversation_manager.add_message("assistant", initial_msg)
+                            self.llm_interface._conversation_manager.add_message("user", user_response)
+                            print(f"[USERNAME EXTRACTION] Re-seeded LLM context with intro (2 messages):")
+                            print(f"[USERNAME EXTRACTION]   assistant: '{seed_assistant}'")
+                            print(f"[USERNAME EXTRACTION]   user: '{seed_user}'")
                         except Exception as e:
                             print(f"[USERNAME EXTRACTION] Warning: Could not clear context: {e}")
 
@@ -491,12 +528,13 @@ Now extract the name from: "{user_response}"
 
                     # Spawn LLM to generate a creative opening question
                     # The LLM context is already seeded with the intro, so it knows the user's name
-                    self._spawn_llm_worker(f"(The user just introduced themselves as {name}. Greet them warmly and ask a creative, unexpected opening question to start an intimate conversation.)")
+                    self._spawn_llm_worker(f"(You asked the user who they are and they told you their name is {name}. Stay in character and continue the conversation.)")
 
             self._notify_update()  # Trigger display refresh
 
         # Spawn worker thread (no streaming for name extraction)
         print(f"[USERNAME EXTRACTION] Spawning LLM worker for name extraction...")
+        print(f"[USERNAME EXTRACTION] Extraction prompt ({len(extraction_prompt)} chars):\n{extraction_prompt[:500]}{'...' if len(extraction_prompt) > 500 else ''}")
         worker = ChatLLMWorker(
             llm_interface=self.llm_interface,
             user_message=extraction_prompt,
@@ -523,16 +561,21 @@ Now extract the name from: "{user_response}"
         # Create placeholder message for streaming
         self.add_assistant_message(f"{bot_name}: ...")
 
+        # Strip bot name prefix if LLM includes it (e.g. "Luna: Hello" -> "Hello")
+        def _strip_bot_prefix(text: str) -> str:
+            prefix = f"{bot_name}: "
+            return text[len(prefix):] if text.startswith(prefix) else text
+
         # Define callbacks
         def on_chunk(chunk_text: str, full_text: str):
             """Called when streaming chunk arrives"""
-            self.update_last_assistant_message(f"{bot_name}: {full_text}")
+            self.update_last_assistant_message(f"{bot_name}: {_strip_bot_prefix(full_text)}")
             self._notify_update()  # Trigger display refresh
 
         def on_complete(final_text: str, success: bool):
             """Called when response complete"""
             if success:
-                self.update_last_assistant_message(f"{bot_name}: {final_text}")
+                self.update_last_assistant_message(f"{bot_name}: {_strip_bot_prefix(final_text)}")
             else:
                 self.update_last_assistant_message(f"{bot_name}: [Error: {final_text}]")
             self._notify_update()  # Trigger display refresh
