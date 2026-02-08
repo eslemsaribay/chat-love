@@ -7,7 +7,17 @@ Run in TD textport/console.
 import sys; sys.path.insert(0, project.folder)
 ```
 
-## Chat App
+## All-in-One Setup
+Runs all setup scripts in order. Registers `recalibrate()` in textport.
+```python
+exec(open(project.folder + '/setup_td.py').read())
+```
+
+---
+
+## Individual Setup Scripts
+
+### Chat App
 LLM chat interface with scrollable viewport and username extraction.
 ```python
 exec(open(project.folder + '/setup_chat_app.py').read())
