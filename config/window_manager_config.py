@@ -69,7 +69,7 @@ WINDOW_MANAGER_CONFIG = {
 
     # Key bindings for window manager signals
     "key_bindings": {
-        "signal_intro_complete": "F3",  # skip intro (only during INTRO phase)
+        "signal_intro_complete": "1",  # skip intro (only during INTRO phase)
         "signal_reveal": "F3",       # trigger reveal (only when chat_manager.reveal_ready)
         "signal_reset": "F9",           # reset to INTRO phase
     },
