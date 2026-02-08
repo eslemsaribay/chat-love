@@ -457,10 +457,10 @@ Now extract the name from: "{user_response}"
 
             response = extracted_response.strip()
 
-            # Check for USERNAME_NOT_FOUND tag
-            if response.startswith(NOT_FOUND_TAG):
+            # Check for USERNAME_NOT_FOUND tag anywhere in response
+            if NOT_FOUND_TAG in response:
                 # Username not understood - extract the follow-up message
-                follow_up_message = response[len(NOT_FOUND_TAG):].strip()
+                follow_up_message = response.replace(NOT_FOUND_TAG, "").strip()
                 print(f"[USERNAME EXTRACTION] NOT_FOUND, follow-up: '{follow_up_message}'")
 
                 # Remove placeholder message
@@ -571,11 +571,11 @@ Now extract the name from: "{user_response}"
         REVEAL_TAG = "<REVEAL>"
 
         def _strip_reveal_tag(text: str) -> str:
-            """Strip <REVEAL> prefix from text for display."""
-            return text[len(REVEAL_TAG):] if text.startswith(REVEAL_TAG) else text
+            """Strip <REVEAL> tag from text anywhere it appears."""
+            return text.replace(REVEAL_TAG, "").strip() if REVEAL_TAG in text else text
 
         def _clean_text(text: str) -> str:
-            """Strip all special prefixes for display."""
+            """Strip all hidden tags and bot prefix for display."""
             return _strip_bot_prefix(_strip_reveal_tag(text))
 
         # Define callbacks
@@ -587,8 +587,8 @@ Now extract the name from: "{user_response}"
         def on_complete(final_text: str, success: bool):
             """Called when response complete"""
             if success:
-                # Check for <REVEAL> signal
-                if final_text.startswith(REVEAL_TAG):
+                # Check for <REVEAL> signal anywhere in response
+                if REVEAL_TAG in final_text:
                     min_msgs = self.config.get("reveal_min_messages", 7)
                     if len(self.messages) >= min_msgs:
                         self.reveal_ready = True
