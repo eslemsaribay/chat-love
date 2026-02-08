@@ -1,7 +1,7 @@
 # TouchDesigner Chat Application - AI Context
 
 ## Project Overview
-TouchDesigner chat app with Ollama LLM integration. Text-based chat with username extraction, scrollable viewport, and real-time LLM responses.
+TouchDesigner chat app with Ollama LLM integration. Text-based chat with username extraction, scrollable viewport, and real-time LLM responses. Multi-monitor window management for routing views to screens.
 
 ## Architecture
 - **chat_manager.py**: Core state (messages, input, scroll, username)
@@ -9,6 +9,9 @@ TouchDesigner chat app with Ollama LLM integration. Text-based chat with usernam
 - **chat_config.py**: Layout, colors, scroll settings
 - **chat_llm_worker.py**: Background thread for LLM calls
 - **llm/**: Ollama API integration, prompts, examples
+- **window_manager.py**: Multi-monitor view switching API
+- **window_manager_config.py**: View definitions, monitor assignments
+- **setup_window_manager.py**: Creates window manager operator network
 
 ## CRITICAL: TouchDesigner Y-Axis (Text COMP Specification DAT)
 - **Bottom-left origin**: Y=0 is at BOTTOM of panel, Y increases UPWARD
@@ -68,3 +71,38 @@ import sys; sys.path.insert(0, project.folder); exec(open(project.folder + '/set
 - `setup_chat_app.py:460` - `_regenerate_table()` in callbacks - Keyboard/mouse scroll rendering
 - `chat_config.py` - Window bounds, scroll step
 - `llm/core/ollama_inference_engine.py` - Context clearing (`"context": []`)
+
+## Window Manager
+Multi-monitor view switching via `winop` parameter on Window COMPs.
+
+### Architecture
+- Container COMP `/project1/window_manager` with 4 In TOPs + 1 COMP reference
+- **in1/in2**: intro_video_1, intro_video_2 → wrapped in Container COMPs (`top_view_0`, `top_view_1`)
+- **in3/in4**: avatar, real_life → routed through Switch TOP (`main_view_switch`) → `main_view_display`
+- **chat**: COMP source, `/project1/chat_application` (referenced by path)
+- Switch TOP has blend enabled for transition animation between avatar/real_life
+
+### Phases & Signals
+- **INTRO**: screen0=intro_video_1, screen1=intro_video_2
+- **ACTIVE**: screen0=chat, screen1=main_view (avatar via Switch TOP index 0)
+- **REVEALED**: screen0=chat, screen1=main_view (real_life via Switch TOP index 1)
+- `signal_intro_complete()`: INTRO → ACTIVE
+- `signal_reveal()`: ACTIVE → REVEALED
+- `signal_reset()`: any → INTRO
+
+### API (from any script)
+```python
+wm = op('/project1/window_manager').fetch('window_manager')
+wm.signal_intro_complete()               # INTRO -> ACTIVE
+wm.signal_reveal()                       # ACTIVE -> REVEALED
+wm.signal_reset()                        # -> INTRO
+wm.open_all() / wm.close_all()          # window control
+wm.set_switch_blend(0.5)                 # mid-transition blend
+wm.phase                                 # current phase name
+wm.add_phase_listener(callback)          # listen for PhaseChangeEvent
+```
+
+### Setup
+```python
+import sys; sys.path.insert(0, project.folder); exec(open(project.folder + '/setup_window_manager.py').read())
+```
