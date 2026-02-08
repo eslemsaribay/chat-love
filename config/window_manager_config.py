@@ -3,7 +3,7 @@ Window Manager Configuration
 All configurable constants for multi-monitor view switching
 """
 
-from global_context import GLOBAL_CONTEXT
+from config.global_context import GLOBAL_CONTEXT
 
 WINDOW_MANAGER_CONFIG = {
     # Resolution (from global context)

@@ -16,12 +16,12 @@ import importlib
 import sys
 
 # Force reload to get latest changes
-for mod in ['global_context', 'window_manager_config', 'window_manager']:
+for mod in ['config.global_context', 'config.window_manager_config', 'window_manager']:
     if mod in sys.modules:
         del sys.modules[mod]
 
-from global_context import GLOBAL_CONTEXT
-from window_manager_config import WINDOW_MANAGER_CONFIG
+from config.global_context import GLOBAL_CONTEXT
+from config.window_manager_config import WINDOW_MANAGER_CONFIG
 
 
 def setup_window_manager():

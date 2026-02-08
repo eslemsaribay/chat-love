@@ -3,7 +3,7 @@ Chat Application Configuration
 All configurable constants for chat layout, colors, and LLM settings
 """
 
-from global_context import GLOBAL_CONTEXT
+from config.global_context import GLOBAL_CONTEXT
 
 CHAT_CONFIG = {
     # Layout (pixels) - Uses global resolution settings

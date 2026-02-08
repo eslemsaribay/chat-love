@@ -7,10 +7,10 @@ import importlib
 import sys
 
 # Force reload global_context to get latest changes
-if 'global_context' in sys.modules:
-    del sys.modules['global_context']
+if 'config.global_context' in sys.modules:
+    del sys.modules['config.global_context']
 
-from global_context import GLOBAL_CONTEXT
+from config.global_context import GLOBAL_CONTEXT
 
 def setup_chat_app():
     """Main setup function - creates complete chat application"""
@@ -186,7 +186,7 @@ def _create_container(project):
         if mod in sys.modules:
             del sys.modules[mod]
 
-    from chat_config import CHAT_CONFIG
+    from config.chat_config import CHAT_CONFIG
     from chat_manager import ChatManager
 
     # Create update callback that will regenerate the table when messages change
@@ -267,7 +267,7 @@ def _create_spec_generator(container):
     # Get messages from ChatManager
     chat_manager = container.fetch('chat_manager', None)
     if chat_manager:
-        from chat_config import CHAT_CONFIG
+        from config.chat_config import CHAT_CONFIG
         messages = chat_manager.get_display_messages()
 
         for msg in messages:
@@ -394,7 +394,7 @@ def _handle_window_signals(key, character, chat_manager):
     if wm is None:
         return False
 
-    from window_manager_config import WINDOW_MANAGER_CONFIG
+    from config.window_manager_config import WINDOW_MANAGER_CONFIG
     bindings = WINDOW_MANAGER_CONFIG.get("key_bindings", {})
 
     # INTRO phase: block all keys from chat, only F3 triggers transition
@@ -437,7 +437,7 @@ def onKey(dat, key, character, alt, lAlt, rAlt, ctrl, lCtrl, rCtrl, shift, lShif
             return
 
         # Import config for colors
-        from chat_config import CHAT_CONFIG
+        from config.chat_config import CHAT_CONFIG
 
         # Process key press (state=True) and key repeat events
         if state:
@@ -567,7 +567,7 @@ def onWheel(comp, wheelDelta, x, y, buttons, ext):
         if not chat_manager or not table_dat:
             return
 
-        from chat_config import CHAT_CONFIG
+        from config.chat_config import CHAT_CONFIG
 
         # wheelDelta is positive when scrolling up, negative when scrolling down
         # Invert the logic: scroll up = see older messages (increase offset)
@@ -602,7 +602,7 @@ def onWheel(comp, wheelDelta, x, y, buttons, ext):
 def _print_completion_message(container):
     """Print setup completion message"""
 
-    from chat_config import CHAT_CONFIG
+    from config.chat_config import CHAT_CONFIG
 
     print("\n" + "=" * 60)
     print("Setup complete!")

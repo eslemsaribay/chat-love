@@ -106,15 +106,15 @@ class ChatManager:
             pass  # Module may not be loaded yet on first run
 
         # Reload chat config module
-        if 'chat_config' in sys.modules:
+        if 'config.chat_config' in sys.modules:
             try:
-                importlib.reload(sys.modules['chat_config'])
-                print("[CHAT RESET] Reloaded: chat_config")
+                importlib.reload(sys.modules['config.chat_config'])
+                print("[CHAT RESET] Reloaded: config.chat_config")
             except Exception as e:
                 print(f"[CHAT RESET] Warning: Could not reload chat_config: {e}")
 
         # Update config from reloaded module
-        from chat_config import CHAT_CONFIG
+        from config.chat_config import CHAT_CONFIG
         self.config.update(CHAT_CONFIG)
         print("[CHAT RESET] Config updated from chat_config.py")
 
