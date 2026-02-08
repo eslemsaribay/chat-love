@@ -24,3 +24,15 @@ Scales Luna model based on detected face size (proxy for distance).
 ```python
 exec(open(project.folder + '/setup_auto_scale.py').read())
 ```
+
+## Window Manager
+Multi-monitor view switching. Routes TOP and COMP views to 2+ screens via Python API.
+```python
+exec(open(project.folder + '/setup_window_manager.py').read())
+```
+After setup, wire video TOPs to the container's inputs, then:
+```python
+wm = op('/project1/window_manager').fetch('window_manager')
+wm.open_all()                     # open windows on monitors
+wm.switch_view(0, 'chat')         # switch screen 0 to chat
+```
