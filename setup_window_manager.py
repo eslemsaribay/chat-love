@@ -164,6 +164,7 @@ def _create_intro_wrappers(container, config, in_tops):
         null_top.nodeX = parent_in_top.nodeX
         null_top.nodeY = 100
         null_top.inputConnectors[0].connect(parent_in_top)
+        null_top.par.fillmode = 'fill'
 
         print(f"  OK {null_name}: Null TOP from in{idx + 1} ('{name}')")
 
@@ -198,6 +199,7 @@ def _create_main_view_switch(container, config, in_tops):
     # Set default index and enable blend for transitions
     switch_top.par.index = default_index
     switch_top.par.blend = True
+    switch_top.par.fillmode = 'fill'
 
     default_label = labels[default_index] if default_index < len(labels) else str(default_index)
     print(f"  Default: {default_label} (index {default_index}), blend enabled")
@@ -208,6 +210,7 @@ def _create_main_view_switch(container, config, in_tops):
     null_out.nodeX = switch_top.nodeX
     null_out.nodeY = -50
     null_out.inputConnectors[0].connect(switch_top)
+    null_out.par.fillmode = 'fill'
 
     print(f"  OK main_view_display: Null TOP from Switch TOP output")
 
@@ -284,7 +287,7 @@ def _initialize_manager(container, config):
 
     from window_manager import WindowManager
 
-    wm = WindowManager(config, td_op=op)
+    wm = WindowManager(config, td_op=op, td_run=run)
 
     # Store on container
     container.store('window_manager', wm)

@@ -60,13 +60,17 @@ WINDOW_MANAGER_CONFIG = {
         },
     },
 
+    # Reveal transition animation
+    "reveal_transition_duration": 3.0,  # seconds for avatar -> real_life blend
+    "reveal_transition_fps": 60,        # animation update rate (frames per second)
+
     # Default phase on startup
     "default_phase": "intro",
 
     # Key bindings for window manager signals
     "key_bindings": {
         "signal_intro_complete": "F3",  # skip intro (only during INTRO phase)
-        "signal_reveal": "space",       # trigger reveal (only when chat_manager.reveal_ready)
+        "signal_reveal": "F3",       # trigger reveal (only when chat_manager.reveal_ready)
         "signal_reset": "F9",           # reset to INTRO phase
     },
 

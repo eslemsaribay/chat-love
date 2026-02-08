@@ -23,7 +23,7 @@ BLENDSHAPES_CHOP = '/project1/blend_shapes'        # MediaPipe blendshapes outpu
 HEAD_BONE_PATH = '/project1/luna_container/Luna/mixamorig_Head'  # Head bone
 EYEBROW_PATH = '/project1/luna_container/Luna/Zenna_eyebrow006'  # Eyebrow geometry
 EYELASH_PATH = '/project1/luna_container/Luna/Zenna_eyelashes02' # Eyelash geometry
-CONTAINER_PATH = '/project1'                        # Where to create operators
+CONTAINER_PATH = '/project1/luna_container'           # Where to create operators
 
 # ============================================================================
 # TUNING PARAMETERS - HEAD

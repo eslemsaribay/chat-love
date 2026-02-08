@@ -21,6 +21,7 @@ Usage from any TD script:
     wm.signal_reveal()           # transition avatar -> real_life
 """
 
+import math
 from typing import Dict, Optional, List, Callable
 
 
@@ -70,15 +71,17 @@ class WindowManager:
       with blend support for transition animation.
     """
 
-    def __init__(self, config: dict, td_op=None):
+    def __init__(self, config: dict, td_op=None, td_run=None):
         """
         Args:
             config: Configuration dictionary from window_manager_config.py
             td_op: TouchDesigner's op() function. Required because imported
                    Python modules don't have op() in their namespace.
+            td_run: TouchDesigner's run() function for delayed execution.
         """
         self.config = config
         self._op = td_op
+        self._run = td_run
         self.container_path = (
             f"{config['parent_path']}/{config['container_name']}"
         )
@@ -94,6 +97,9 @@ class WindowManager:
 
         # Current phase
         self._phase: str = config.get("default_phase", PHASE_INTRO)
+
+        # Reveal transition state
+        self._reveal_transitioning = False
 
         # Event listeners
         self._view_listeners: List[Callable[[ViewSwitchEvent], None]] = []
@@ -175,28 +181,107 @@ class WindowManager:
 
         Transitions ACTIVE -> REVEALED:
         - Screen layout stays the same (chat + main_view)
-        - Switch TOP transitions from avatar (0) to real_life (1)
+        - Switch TOP animates from avatar (0) to real_life (1)
+          using asymmetric ease-in-out (ease-in 2x smoother than ease-out)
         """
         if self._phase != PHASE_ACTIVE:
             print(f"[WINDOW MGR] WARNING: signal_reveal called "
                   f"during '{self._phase}' phase, expected '{PHASE_ACTIVE}'")
+            return
 
-        self._set_switch_index(1)
+        if self._reveal_transitioning:
+            print("[WINDOW MGR] WARNING: reveal transition already in progress")
+            return
 
         previous = self._phase
         self._phase = PHASE_REVEALED
         event = PhaseChangeEvent(PHASE_REVEALED, previous)
         self._fire_phase_event(event)
         print(f"[WINDOW MGR] Phase: '{previous}' -> '{PHASE_REVEALED}' "
-              f"(Switch TOP -> real_life)")
+              f"(starting reveal transition)")
+
+        self._start_reveal_transition()
+
+    # ================================================================
+    # Reveal Transition Animation
+    # ================================================================
+
+    @staticmethod
+    def _asymmetric_ease(t: float) -> float:
+        """Asymmetric ease-in-out where ease-in is 2x smoother than ease-out.
+
+        Uses piecewise power functions:
+        - Ease-in (t < 0.5):  power of 3 (cubic) — very smooth entry
+        - Ease-out (t >= 0.5): power of 1.5 — faster, snappier exit
+
+        Both pieces meet at (0.5, 0.5) with continuous value.
+        """
+        if t <= 0.0:
+            return 0.0
+        if t >= 1.0:
+            return 1.0
+
+        if t < 0.5:
+            # Ease-in: cubic (power 3), normalized to reach 0.5 at t=0.5
+            # f(t) = 4 * t^3  (since 4 * 0.5^3 = 0.5)
+            return 4.0 * t * t * t
+        else:
+            # Ease-out: power 1.5, normalized from 0.5 to 1.0
+            # Map t from [0.5, 1.0] to s in [0, 1], apply inverse ease
+            s = (t - 0.5) * 2.0  # s in [0, 1]
+            # f(s) = 1 - (1-s)^1.5, mapped to [0.5, 1.0]
+            return 0.5 + 0.5 * (1.0 - math.pow(1.0 - s, 1.5))
+
+    def _start_reveal_transition(self):
+        """Animate Switch TOP from index 0 to 1 over configured duration."""
+        duration = self.config.get("reveal_transition_duration", 3.0)
+        fps = self.config.get("reveal_transition_fps", 60)
+        total_frames = max(1, int(duration * fps))
+
+        self._reveal_transitioning = True
+        self.set_switch_blend(0.0)
+
+        print(f"[WINDOW MGR] Reveal transition: {duration}s, "
+              f"{total_frames} frames")
+
+        for frame in range(1, total_frames + 1):
+            t = frame / total_frames
+            is_last = (frame == total_frames)
+
+            if self._run is not None:
+                self._run(
+                    self._reveal_tick, t, is_last,
+                    delayFrames=frame
+                )
+            else:
+                print("[WINDOW MGR] ERROR: td_run not available, "
+                      "cannot animate reveal transition")
+                self._set_switch_index(1)
+                self._reveal_transitioning = False
+                return
+
+    def _reveal_tick(self, t: float, is_last: bool):
+        """Single frame of the reveal transition animation."""
+        if not self._reveal_transitioning:
+            return  # transition was cancelled (e.g. by signal_reset)
+
+        blend = self._asymmetric_ease(t)
+        self.set_switch_blend(blend)
+
+        if is_last:
+            self._set_switch_index(1)
+            self._reveal_transitioning = False
+            print("[WINDOW MGR] Reveal transition complete")
 
     def signal_reset(self):
         """Signal: reset to intro phase.
 
         Resets everything:
+        - Cancels any in-progress reveal transition
         - Both screens back to intro videos
         - Switch TOP back to avatar (index 0)
         """
+        self._reveal_transitioning = False
         self._set_switch_index(0)
         self._apply_phase(PHASE_INTRO)
 

@@ -567,16 +567,35 @@ Now extract the name from: "{user_response}"
             prefix = f"{bot_name}: "
             return text[len(prefix):] if text.startswith(prefix) else text
 
+        REVEAL_TAG = "<REVEAL>"
+
+        def _strip_reveal_tag(text: str) -> str:
+            """Strip <REVEAL> prefix from text for display."""
+            return text[len(REVEAL_TAG):] if text.startswith(REVEAL_TAG) else text
+
+        def _clean_text(text: str) -> str:
+            """Strip all special prefixes for display."""
+            return _strip_bot_prefix(_strip_reveal_tag(text))
+
         # Define callbacks
         def on_chunk(chunk_text: str, full_text: str):
             """Called when streaming chunk arrives"""
-            self.update_last_assistant_message(f"{bot_name}: {_strip_bot_prefix(full_text)}")
+            self.update_last_assistant_message(f"{bot_name}: {_clean_text(full_text)}")
             self._notify_update()  # Trigger display refresh
 
         def on_complete(final_text: str, success: bool):
             """Called when response complete"""
             if success:
-                self.update_last_assistant_message(f"{bot_name}: {_strip_bot_prefix(final_text)}")
+                # Check for <REVEAL> signal
+                if final_text.startswith(REVEAL_TAG):
+                    min_msgs = self.config.get("reveal_min_messages", 7)
+                    if len(self.messages) >= min_msgs:
+                        self.reveal_ready = True
+                        print(f"[REVEAL] Signal detected after {len(self.messages)} messages. reveal_ready = True")
+                    else:
+                        print(f"[REVEAL] Signal detected but only {len(self.messages)}/{min_msgs} messages. Ignoring.")
+
+                self.update_last_assistant_message(f"{bot_name}: {_clean_text(final_text)}")
             else:
                 self.update_last_assistant_message(f"{bot_name}: [Error: {final_text}]")
             self._notify_update()  # Trigger display refresh
