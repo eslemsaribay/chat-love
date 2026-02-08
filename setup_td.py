@@ -22,7 +22,6 @@ print("=" * 60)
 _setup_scripts = [
     ('Chat App',        'setup_chat_app.py'),
     ('Head Tracking',   'setup_head_tracking.py'),
-    ('Auto-Scale',      'setup_auto_scale.py'),
     ('Window Manager',  'setup_window_manager.py'),
 ]
 
