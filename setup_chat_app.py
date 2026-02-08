@@ -381,6 +381,43 @@ def _wrap_text(text, max_chars=60):
     """Wrap text to fit within max_chars per line, returns list of lines"""
     return textwrap.wrap(text, width=max_chars, break_long_words=True, break_on_hyphens=True) or [text]
 
+def _get_window_manager():
+    """Get the WindowManager instance (None if not set up)."""
+    wm_container = op('/project1/window_manager')
+    if wm_container is None:
+        return None
+    return wm_container.fetch('window_manager', None)
+
+def _handle_window_signals(key, character, chat_manager):
+    """Handle window manager signal keys. Returns True if key was consumed."""
+    wm = _get_window_manager()
+    if wm is None:
+        return False
+
+    from window_manager_config import WINDOW_MANAGER_CONFIG
+    bindings = WINDOW_MANAGER_CONFIG.get("key_bindings", {})
+
+    # INTRO phase: block all keys from chat, only F3 triggers transition
+    if wm.phase == "intro":
+        intro_key = bindings.get("signal_intro_complete", "F3")
+        if key == intro_key:
+            wm.signal_intro_complete()
+        return True  # consume ALL keys during intro
+
+    # Reset key (works in any phase)
+    reset_key = bindings.get("signal_reset", "F9")
+    if key == reset_key:
+        wm.signal_reset()
+        return True
+
+    # Reveal key (only when reveal_ready flag is set)
+    reveal_key = bindings.get("signal_reveal", "space")
+    if key == reveal_key and getattr(chat_manager, 'reveal_ready', False):
+        wm.signal_reveal()
+        return True
+
+    return False
+
 def onKey(dat, key, character, alt, lAlt, rAlt, ctrl, lCtrl, rCtrl, shift, lShift, rShift, state, time):
     """Handle key press events"""
 
@@ -398,6 +435,10 @@ def onKey(dat, key, character, alt, lAlt, rAlt, ctrl, lCtrl, rCtrl, shift, lShif
 
         # Process key press (state=True) and key repeat events
         if state:
+            # Window manager signals (checked first, may consume the key)
+            if _handle_window_signals(key, character, chat_manager):
+                return
+
             # Handle special keys
             if key == 'enter':
                 # Submit input via ChatManager
