@@ -43,6 +43,7 @@ class ChatManager:
         self.awaiting_username = True  # First message will determine username
         self.on_update_callback = on_update_callback  # Callback for display refresh
         self.scroll_offset = 0  # Pixels scrolled (positive = scrolled up to see older messages)
+        self.reveal_ready = False  # Set to True when reveal condition is met (logic TBD)
 
     def initialize_llm(self):
         """Initialize LLM from existing llm/ package"""
