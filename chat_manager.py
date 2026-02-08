@@ -124,6 +124,7 @@ class ChatManager:
         self.config["user_name"] = None
         self.awaiting_username = True
         self.scroll_offset = 0  # Reset scroll position
+        self.reveal_ready = False  # Reset reveal state
 
         # FULL LLM RESET: Destroy singleton and recreate with fresh prompts
         # This ensures prompt modules are reloaded and new ChatInterface is created

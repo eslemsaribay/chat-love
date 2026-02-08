@@ -408,6 +408,8 @@ def _handle_window_signals(key, character, chat_manager):
     reset_key = bindings.get("signal_reset", "F9")
     if key == reset_key:
         wm.signal_reset()
+        if chat_manager is not None:
+            chat_manager.reset()
         return True
 
     # Reveal key (only when reveal_ready flag is set)
@@ -426,8 +428,12 @@ def onKey(dat, key, character, alt, lAlt, rAlt, ctrl, lCtrl, rCtrl, shift, lShif
         chat_manager = parent_comp.fetch('chat_manager', None)
         table_dat = parent_comp.op('chat_spec_generator')
 
+        # Window manager signals work even without chat_manager/LLM
+        if state:
+            if _handle_window_signals(key, character, chat_manager):
+                return
+
         if not chat_manager or not table_dat:
-            print("WARNING: chat_manager or table_dat not found")
             return
 
         # Import config for colors
@@ -435,10 +441,6 @@ def onKey(dat, key, character, alt, lAlt, rAlt, ctrl, lCtrl, rCtrl, shift, lShif
 
         # Process key press (state=True) and key repeat events
         if state:
-            # Window manager signals (checked first, may consume the key)
-            if _handle_window_signals(key, character, chat_manager):
-                return
-
             # Handle special keys
             if key == 'enter':
                 # Submit input via ChatManager

@@ -10,8 +10,8 @@ print("=" * 70)
 
 MEDIAPIPE_CHOP = '/project1/face_points'
 LUNA_PATH = '/project1/luna_container/Luna'
-CONTAINER_PATH = '/project1'
-HEAD_POSE_PATH = '/project1/luna_head_pose'
+CONTAINER_PATH = '/project1/luna_container'
+HEAD_POSE_PATH = '/project1/luna_container/luna_head_pose'
 
 # =============================================================================
 # TUNING PARAMETERS
