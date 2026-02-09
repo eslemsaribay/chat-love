@@ -43,7 +43,7 @@ class ChatManager:
         self.awaiting_username = True  # First message will determine username
         self.on_update_callback = on_update_callback  # Callback for display refresh
         self.scroll_offset = 0  # Pixels scrolled (positive = scrolled up to see older messages)
-        self.reveal_ready = False  # Set to True when reveal condition is met (logic TBD)
+        self.reveal_ready = False  # Legacy flag, kept for backward compat
 
     def initialize_llm(self):
         """Initialize LLM from existing llm/ package"""
@@ -587,15 +587,8 @@ Now extract the name from: "{user_response}"
         def on_complete(final_text: str, success: bool):
             """Called when response complete"""
             if success:
-                # Check for <REVEAL> signal anywhere in response
                 if REVEAL_TAG in final_text:
-                    min_msgs = self.config.get("reveal_min_messages", 7)
-                    if len(self.messages) >= min_msgs:
-                        self.reveal_ready = True
-                        print(f"[REVEAL] Signal detected after {len(self.messages)} messages. reveal_ready = True")
-                    else:
-                        print(f"[REVEAL] Signal detected but only {len(self.messages)}/{min_msgs} messages. Ignoring.")
-
+                    print(f"[REVEAL] LLM sent reveal signal (informational only)")
                 self.update_last_assistant_message(f"{bot_name}: {_clean_text(final_text)}")
             else:
                 self.update_last_assistant_message(f"{bot_name}: [Error: {final_text}]")

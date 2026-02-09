@@ -38,9 +38,6 @@ CHAT_CONFIG = {
     "user_name": None,                          # User name (determined dynamically)
     "initial_message": "Hi! I'm Luna, who are you?",  # First message from bot
 
-    # Reveal settings
-    "reveal_min_messages": 7,  # Minimum messages before <REVEAL> tag is honored
-
     # LLM Settings
     "ollama_model": "llama3.1",
     "streaming_enabled": True,

@@ -412,9 +412,9 @@ def _handle_window_signals(key, character, chat_manager):
             chat_manager.reset()
         return True
 
-    # Reveal key (only when reveal_ready flag is set)
+    # Reveal key (only during ACTIVE phase, blocked during REVEALED to prevent duplicate timers)
     reveal_key = bindings.get("signal_reveal", "space")
-    if key == reveal_key and getattr(chat_manager, 'reveal_ready', False):
+    if key == reveal_key and wm.phase == "active":
         wm.signal_reveal()
         return True
 
