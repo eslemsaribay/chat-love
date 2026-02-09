@@ -306,6 +306,14 @@ def _initialize_manager(container, config):
                 wm._screen_views[screen_idx] = view_name
                 print(f"  Screen {screen_idx}: '{view_name}' ({target_path})")
 
+    # Wire auto-reset callback to also reset chat manager
+    chat_container = op('/project1/chat_application')
+    if chat_container:
+        chat_mgr = chat_container.fetch('chat_manager', None)
+        if chat_mgr:
+            wm.set_on_reset(chat_mgr.reset)
+            print(f"  Auto-reset wired to chat_manager.reset()")
+
     print(f"  Phase: '{default_phase}'")
     print(f"  OK WindowManager stored at {container.path}")
 

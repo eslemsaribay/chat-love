@@ -101,6 +101,10 @@ class WindowManager:
         # Reveal transition state
         self._reveal_transitioning = False
 
+        # Auto-reset state
+        self._auto_reset_pending = False
+        self._on_reset_callback: Optional[Callable] = None
+
         # Event listeners
         self._view_listeners: List[Callable[[ViewSwitchEvent], None]] = []
         self._phase_listeners: List[Callable[[PhaseChangeEvent], None]] = []
@@ -272,16 +276,56 @@ class WindowManager:
             self._set_switch_index(1)
             self._reveal_transitioning = False
             print("[WINDOW MGR] Reveal transition complete")
+            self._schedule_auto_reset()
+
+    # ================================================================
+    # Auto-Reset Timer
+    # ================================================================
+
+    def _schedule_auto_reset(self):
+        """Schedule auto-reset after configured delay in REVEALED phase."""
+        delay = self.config.get("auto_reset_delay", 30.0)
+        if delay <= 0 or self._run is None:
+            return
+
+        fps = self.config.get("reveal_transition_fps", 60)
+        delay_frames = max(1, int(delay * fps))
+
+        self._auto_reset_pending = True
+        self._run(self._auto_reset_tick, delayFrames=delay_frames)
+        print(f"[WINDOW MGR] Auto-reset scheduled in {delay}s")
+
+    def _auto_reset_tick(self):
+        """Fired after auto-reset delay. Only resets if still in REVEALED phase."""
+        if not self._auto_reset_pending:
+            return  # cancelled by manual reset
+        if self._phase != PHASE_REVEALED:
+            return  # phase already changed
+
+        print("[WINDOW MGR] Auto-reset triggered")
+        self._auto_reset_pending = False
+        self.signal_reset()
+        if self._on_reset_callback is not None:
+            self._on_reset_callback()
+
+    def set_on_reset(self, callback: Optional[Callable] = None):
+        """Set callback invoked on auto-reset (e.g. chat_manager.reset)."""
+        self._on_reset_callback = callback
+
+    # ================================================================
+    # Manual Reset
+    # ================================================================
 
     def signal_reset(self):
         """Signal: reset to intro phase.
 
         Resets everything:
-        - Cancels any in-progress reveal transition
+        - Cancels any in-progress reveal transition and auto-reset timer
         - Both screens back to intro videos
         - Switch TOP back to avatar (index 0)
         """
         self._reveal_transitioning = False
+        self._auto_reset_pending = False
         self._set_switch_index(0)
         self._apply_phase(PHASE_INTRO)
 
